@@ -1,88 +1,104 @@
 # Glose
 
-La navette entre un auteur et son agent IA, dans les marges du texte.
+Review a Markdown text with your AI agent, in the margins.
 
-Glose affiche un texte écrit en Markdown dans le navigateur, mis en forme. L'auteur y commente et y propose des modifications ; l'agent IA (Claude Code, Codex, OpenCode…) répond et propose les siennes ; l'auteur accepte ou rejette d'un clic. Tout s'écrit dans le fichier Markdown, en [CriticMarkup](https://github.com/CriticMarkup/CriticMarkup-toolkit), à l'endroit visé et nulle part ailleurs. L'histoire de la navette est gardée dans un journal.
+Glose shows a Markdown text, rendered, in your browser. The author comments on it and suggests changes; the AI agent (Claude Code, Codex, OpenCode…) replies and suggests its own; the author accepts or rejects each one with a click. Everything is written into the Markdown file itself, as [CriticMarkup](https://github.com/CriticMarkup/CriticMarkup-toolkit), at the exact place concerned and nowhere else. The history of the exchange is kept in a journal.
 
-> Une *glose* est une note écrite en marge d'un texte pour l'expliquer ou le discuter ; les glossateurs de Bologne annotaient ainsi le *Digeste*.
+> A *gloss* (French *glose*) is a note written in the margin of a text to explain or discuss it; the glossators of Bologna annotated the *Digest* this way.
 
-**État** : expérimental (version 0.x). Lire, commenter, proposer et corriger à l'écran, mener la navette et la suivre, conserver ses brouillons ; écritures durables ; gros ouvrages affichés partie par partie. Essayé sous Linux et WSL ; Windows natif compile mais n'a pas encore été essayé en conditions réelles.
+**Status:** experimental (version 0.x). Reading, commenting, suggesting and editing on screen, running and following the review rounds, keeping drafts; durable writes; large books displayed part by part. Tested on Linux and WSL; native Windows builds but has not been tried in real use yet.
 
-**Pour commencer** : `docs/GUIDE.md` (préparer un texte, mener une navette, sauvegarder, reprendre quand quelque chose bloque, ce que Glose sait lire).
+> [!NOTE]
+> **Glose is currently in French only**: the interface, the command-line messages, the instructions written for the agent and the documentation in `docs/`. An English version is on the TODO list.
 
-## Principes
+## Principles
 
-- **Le fichier n'est jamais régénéré** : Glose ne touche qu'aux plages annotées ou décidées.
-- **L'auteur décide** : l'agent propose, il n'applique jamais.
-- **Tout reste local** : serveur sur `127.0.0.1`, aucune requête vers l'extérieur.
-- **Un seul programme** (`glose`, écrit en Go), plus pandoc.
+- **The file is never regenerated:** Glose only touches the ranges that are annotated or decided upon. Every other byte stays as it was (line endings, byte order mark, formatting).
+- **The author decides:** the agent suggests, it never applies.
+- **Everything stays local:** the server listens on `127.0.0.1` only, with a session token, and makes no outgoing request.
+- **One program** (`glose`, written in Go), plus pandoc.
 
 ## Installation
 
-Prérequis : Go 1.27 (pour construire) et pandoc 3.1 ou plus récent.
+Requirements: Go 1.27 (to build) and pandoc 3.1 or later (3.1.3 is the only version tested).
 
 ```bash
 go install github.com/ptitan/glose/cmd/glose@latest
 ```
 
-ou, depuis une copie du dépôt :
+or, from a clone of the repository:
 
 ```bash
-./scripts/build.sh          # produit bin/glose
-cp bin/glose ~/.local/bin/  # ou tout dossier du PATH
+./scripts/build.sh          # builds bin/glose
+cp bin/glose ~/.local/bin/  # or any directory in your PATH
 ```
+
+`glose doctor` checks the installation (pandoc, Git, browser) and the project, and says how to fix each problem.
 
 ## Usage
 
 ```bash
-glose open                  # le dossier courant : lance le serveur en arrière-plan, ouvre le navigateur
-glose open notes.md         # un seul fichier
-glose help profile          # le profil glose.json : fichiers, dossiers, motifs, filtre d'affichage
-glose init                  # profil glose.json et section « Navette Glose » pour l'agent (AGENTS.md ou CLAUDE.md)
-glose status                # à qui est la main, combien d'annotations, quels problèmes
-glose list                  # les annotations, fichier:ligne:colonne ; --json pour un agent
-glose log                   # l'histoire : tours, opérations, décisions archivées
-glose doctor                # installation (pandoc, Git, navigateur) et projet (filtre, droits, serveur), avec la correction de chaque problème
-glose check                 # profil, pandoc, marques, identités, journal (code 1 en cas d'erreur ; les avertissements laissent 0)
-glose render > page.html    # le HTML affiché, pour contrôler un filtre
-glose stop                  # arrête le serveur
+glose open                  # the current directory: starts the server in the background, opens the browser
+glose open notes.md         # a single file
+glose init                  # glose.json profile and a "Navette Glose" section for the agent (AGENTS.md or CLAUDE.md)
+glose help profile          # the glose.json profile: files, directories, patterns, display filter
+glose status                # whose turn it is, how many annotations, which problems
+glose list                  # the annotations, as file:line:column; --json for an agent
+glose log                   # the history: turns, operations, archived decisions
+glose doctor                # installation and project checks, with fixes
+glose check                 # profile, pandoc, marks, identifiers, journal (exit code 1 on error; warnings leave 0)
+glose render > page.html    # the rendered HTML, to check a filter
+glose stop                  # stops the server
 ```
 
-Dans le navigateur : sélectionner un passage, puis « Commenter » (C) ou « Suggérer » (S) ; la poignée de la marge gauche agit sur un paragraphe entier. Chaque annotation est écrite aussitôt dans le fichier, en CriticMarkup, avec son identité. Les cartes de la marge montrent le fil (auteur et agent) et les décisions : accepter, rejeter, résoudre, ou tout accepter dans un fichier. Annuler et Rétablir (Ctrl+Z, Ctrl+Y) portent sur vos dernières actions. Au clavier : J et K passent d'une annotation à l'autre, A accepte, X rejette, R répond, E corrige votre proposition (sur la carte active) ; 1, 2, 3 changent de vue. La colonne de gauche a quatre onglets, en icônes (Alt+1 à Alt+4) : Sommaire (avec l'avancement de la relecture), Fichiers (choisir la partie affichée), Annotations (filtrables), Navette (la frise des tours).
+### In the browser
 
-**La navette.** Quand l'auteur a fini, il clique sur « Remettre à l'agent ». L'agent, guidé par la section écrite par `glose init` :
+Select a passage, then **Commenter** (comment, `C`) or **Suggérer** (suggest, `S`); the handle in the left margin acts on a whole paragraph. Each annotation is written to the file at once, as CriticMarkup, with its own identifier. The cards in the margin show the thread (author and agent) and the decisions: accept, reject, resolve, or accept everything in a file. Undo and redo (`Ctrl+Z`, `Ctrl+Y`) apply to your latest actions.
+
+Keyboard: `J` and `K` move between annotations; on the active card, `A` accepts, `X` rejects, `R` replies, `E` edits your own suggestion; `1`, `2`, `3` switch views (changes, current text, proposed text). The left column has four tabs (`Alt+1` to `Alt+4`): table of contents (with review progress), files (choose the part displayed), annotations (with filters), and the timeline of turns.
+
+**Search** (`Ctrl+Shift+F`) looks through every file, even those not displayed, in the current or the proposed text. Markdown links between chapters open the target part. Archived discussions can be read again from the timeline: suggestion, decision and the whole thread.
+
+### Taking turns with the agent
+
+When the author is done, they click **Remettre à l'agent** (hand over to the agent). The agent, guided by the section written by `glose init`, then works with:
 
 ```bash
-glose wait                  # attend la remise de l'auteur (rend la main aussitôt si c'est déjà le cas)
-glose list --json           # les annotations à traiter
-glose reply --id ID --text "…"                                        # répondre dans un fil
-glose propose --file a.md --find "texte" --new "autre texte" --note "…"   # proposer, avec une explication (--whole : en un bloc)
-# … ou modifier le fichier librement : ses modifications deviendront des propositions
-glose done --note "…"       # remettre le tour ; les modifications libres deviennent des propositions
+glose wait                  # waits for the author to hand over (returns at once if they already have)
+glose list --json           # the annotations to deal with
+glose reply --id ID --text "…"                                          # reply in a thread
+glose propose --file a.md --find "text" --new "other text" --note "…"   # suggest a change, with an explanation (--whole: as one block)
+# … or edit the file freely: its changes will become suggestions
+glose done --note "…"       # hands the turn back; free edits become suggestions
 ```
 
-L'auteur accepte ou rejette ; la navette s'achève quand il ne reste plus d'annotation. L'agent ne décide jamais. Si l'agent ne remet pas son tour, l'auteur peut reprendre la main depuis le bandeau (`docs/GUIDE.md`, « Reprendre »).
+The author accepts or rejects; the review ends when no annotation is left. The agent never decides. If the agent does not hand its turn back, the author can take it back from the banner.
 
-Sans profil, Glose prend les `.md` du dossier et de ses sous-dossiers, dans l'ordre d'une table des matières (sauf dossiers cachés et consignes d'agent). Un fichier `glose.json` peut choisir les fichiers, dossiers ou motifs du texte, en écarter d'autres, fixer un titre, et adapter l'affichage par un filtre Lua et une feuille de style propres au texte (`glose help profile`).
+### Projects
 
-**Brouillons.** Les commentaires, réponses et réécritures se sauvegardent pendant la saisie, séparément du manuscrit, dans `.glose/brouillons/`. Fermer un panneau conserve sa saisie ; le bouton **Brouillons** permet de la reprendre ou de l'abandonner. Attendez « Brouillon sauvegardé dans le projet » pour garantir sa récupération après redémarrage du serveur. Si le fichier a changé ou qu'un enregistrement a eu une réponse incertaine, le brouillon reste à copier et à vérifier, sans réapplication automatique. Ces fichiers contiennent vos saisies privées : sauvegardez-les si nécessaire, mais ne les publiez pas par défaut.
+Without a profile, Glose takes the `.md` files of the directory and its subdirectories, in table-of-contents order (skipping hidden directories and agent instruction files). A `glose.json` file can choose the files, directories or patterns that make up the text, exclude others, set a title, and adapt the display with a Lua filter and a stylesheet of the text's own (`glose help profile`).
 
-**Retrouver un passage.** **Rechercher** (Ctrl+Maj+F) cherche dans tous les fichiers, même non affichés, dans la vue Actuel ou Proposé. Un résultat ouvre son chapitre et surligne le passage ; un fichier changé depuis la recherche impose de la relancer. Les liens Markdown entre chapitres ouvrent aussi la partie visée. Dans **Navette**, choisir une main puis ouvrir une archive permet de relire la proposition, la décision et toute sa discussion dans un panneau de lecture.
+**Drafts.** Comments, replies and rewrites are saved as you type, apart from the manuscript, in `.glose/brouillons/`. Closing a panel keeps what you typed; the **Brouillons** (drafts) button lets you resume or discard it. These files hold your private input: back them up if needed, but do not publish them by default.
 
-**Sauvegarder.** Suivez avec Git vos fichiers `.md`, `.glose/journal.jsonl` et `.glose/snapshots/` ; le reste de `.glose/` est local (`docs/GUIDE.md`, « Sauvegarder »).
+**Backups.** Track your `.md` files, `.glose/journal.jsonl` and `.glose/snapshots/` with Git; the rest of `.glose/` is local.
 
-**Limites.** UTF-8 obligatoire ; ce que Glose ne peut pas situer au caractère près s'annote au paragraphe, jamais au hasard ; pandoc 3.1.3 est la seule version suivie ; un très gros fichier se refait section par section (2 à 3 s pour 240 000 mots d'un seul tenant). Détail : `docs/GUIDE.md`, « Ce que Glose sait lire ».
+**Limits.** UTF-8 only. What Glose cannot locate to the exact character can be annotated at paragraph level only, never by guesswork. A very large single file is re-rendered section by section (2 to 3 s for 240,000 words in one file).
 
-## Documentation
+## Documentation (in French)
 
-- `docs/GUIDE.md` : préparer un texte, mener une navette, sauvegarder, reprendre, ce que Glose sait lire.
-- `docs/TESTS-NAVIGATEUR.md` : essais reproductibles dans Chrome/Chromium (`./scripts/test-browser.sh`), sans paquet npm.
-- `docs/UNICODE.md` : entretien des tables Unicode.
+- `docs/GUIDE.md`: preparing a text, running a review, backing up, recovering when something goes wrong, what Glose can read.
+- `docs/TESTS-NAVIGATEUR.md`: reproducible browser tests in Chrome/Chromium (`./scripts/test-browser.sh`), without any npm package.
+- `docs/UNICODE.md`: maintaining the Unicode tables.
 
-Vérifications de développement : `./scripts/check.sh` (format, analyse statique, tests, compilation Windows de contrôle).
+Development checks: `./scripts/check.sh` (formatting, static analysis, tests, Windows cross-build).
 
-## Licence
+## TODO
 
-Glose est un logiciel libre : vous pouvez le redistribuer et le modifier selon les termes de la licence publique générale GNU (GPL), version 3 ou toute version ultérieure. Voir `LICENSE`.
+- English version of the interface, command-line messages, agent instructions and documentation.
+- Real-use testing on native Windows.
 
-Les icônes viennent de [Lucide](https://lucide.dev) (licence ISC, avis reproduit dans `web/icones.js`).
+## License
+
+Glose is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License, version 3 or (at your option) any later version. See `LICENSE`.
+
+Icons come from [Lucide](https://lucide.dev) (ISC license, notice reproduced in `web/icones.js`).

@@ -14,7 +14,7 @@ const cycles = Number(process.env.GLOSE_ENDURANCE_TURNS || 8);
 assert.ok(Number.isInteger(cycles) && cycles >= 4 && cycles <= 100 && cycles % 4 === 0, 'GLOSE_ENDURANCE_TURNS : multiple de 4, entre 4 et 100');
 const hash = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
 const cases = [
-  ['README.md', 'Glose affiche un texte écrit en Markdown dans le navigateur, mis en forme.', 'Glose affiche dans le navigateur un texte Markdown mis en forme.'],
+  ['README.md', 'Glose shows a Markdown text, rendered, in your browser.', 'Glose renders a Markdown text in your browser.'],
   ['docs/TESTS-NAVIGATEUR.md', 'Aucune installation ni aucun téléchargement automatique.', 'Aucune installation ni aucun téléchargement ne sont lancés automatiquement.'],
   ['docs/GUIDE.md', 'Ce guide s\'adresse à l\'auteur.', 'Ce guide est écrit pour l\'auteur.'],
 ];
