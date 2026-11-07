@@ -1,0 +1,3 @@
+# Les corpus de test sont comparés octet par octet : Git ne doit jamais
+# convertir leurs fins de ligne ni leur encodage.
+**/testdata/** -text

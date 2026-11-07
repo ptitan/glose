@@ -1,0 +1,3 @@
+L'apostrophe droite, des "guillemets droits", un tiret -- et --- ici...
+
+Un 'simple' aussi.

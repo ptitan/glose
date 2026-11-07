@@ -1,0 +1,6 @@
+# Exécutables produits par scripts/build.sh
+/bin/
+*.exe
+
+# État local d'un projet relu (serveur, journal) lorsqu'on essaie Glose sur ce dépôt
+.glose/
