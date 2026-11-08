@@ -41,6 +41,8 @@ cp bin/glose ~/.local/bin/  # or any directory in your PATH
 glose open                  # the current directory: starts the server in the background, opens the browser
 glose open notes.md         # a single file
 glose init                  # glose.json profile and a "Navette Glose" section for the agent (AGENTS.md or CLAUDE.md)
+glose set                   # agent settings, for all projects: installed agents, short names (agent + model), default agent
+glose set --list            # the same, printed, without the browser
 glose help profile          # the glose.json profile: files, directories, patterns, display filter
 glose status                # whose turn it is, how many annotations, which problems
 glose list                  # the annotations, as file:line:column; --json for an agent
@@ -76,7 +78,20 @@ glose done --note "…"       # hands the turn back; free edits become suggestio
 
 The author accepts or rejects; the review ends when no annotation is left. The agent never decides. If the agent does not hand its turn back, the author can take it back from the top bar.
 
-**Agents.** `glose set` opens the agent settings (shared by all projects): installed agents (Claude Code, Codex, OpenCode), short names for an agent + model pair, and the default one; no key is stored, each agent keeps its own login and tools. Glose can then launch the agent when the author hands over (non-interactive, in the project directory, with reduced permissions, one at a time, with a time limit; its output is kept and it can be stopped). An agent session already open elsewhere can be bound to Glose with a short code (`glose join CODE`). Each annotation may name the agent that must answer (`@Name`, or « Réponse par »): Glose then runs one pass per agent, in sequence, and hands the turn back itself; every reply is signed with the agent's name.
+### Agents
+
+Glose works with a command-line agent (Claude Code, Codex, OpenCode); it never calls a model itself and stores no key: each agent keeps its own login and tools (MCP servers, skills).
+
+```bash
+glose set                   # opens the agent settings page (shared by all projects)
+glose join CODE --agent Sol # binds an agent session already open elsewhere, then waits for the hand
+```
+
+- **`glose set`** lists the installed agents, lets you name agent + model pairs with short names (« Sol » = Codex with a given model) and choose the default one. **Essayer** (try) runs an agent dry, without writing anything. Until an agent is configured, the interface and `glose open`, `status`, `doctor` say so.
+- **Launch at hand-over.** When you hand over, Glose can launch the agent itself: non-interactive, in the project directory, with reduced permissions (run `glose`, read and write the text), one at a time, with a time limit. The capsule menu shows its output, stops it, or launches it again.
+- **Bind a session.** « Lier un agent » (capsule menu) gives an instruction ready to paste into an agent session, with a short code. `glose join` binds the session and waits for your hand-over; when it ends with « délai écoulé » (timeout), the agent runs the same command again, and again for every following turn. The capsule shows who listens, with the model when known.
+- **One agent per annotation.** An annotation may name the agent that must answer (« Réponse par », or `@Name` at the start of the text). Glose then runs one pass per agent, in sequence, and hands the turn back itself; every reply is signed with the agent's name and model.
+- A text may ask for its own agent, instructions and required tools in its `glose.json` (key `agent`, see `glose help profile`).
 
 ### Projects
 
