@@ -430,3 +430,96 @@ func FuzzRevise(f *testing.F) {
 		}
 	})
 }
+
+// P9.1 : un commentaire réécrit garde sa place, son fil et les identités ;
+// rien d'autre ne bouge, octet pour octet.
+func TestAmendKeepsTheThread(t *testing.T) {
+	cases := []struct {
+		src  string
+		nth  int // which comment mark of the annotation, from 0 (the main mark if a comment)
+		text string
+		want string
+	}{
+		{"a {>>vieux<<} b", 0, "neuf", "a {>>neuf<<} b"},
+		{"a {==passage==}{>>vieux<<}{>>glose:v1 id=abcdef by=author<<} b", 1, "neuf",
+			"a {==passage==}{>>neuf<<}{>>glose:v1 id=abcdef by=author<<} b"},
+		{"a {~~x~>y~~}{>>glose:v1 id=abcdef by=agent<<}{>>vieux<<}{>>glose:v1 id=ghijkm re=abcdef by=author<<} b", 2, "neuf 😀",
+			"a {~~x~>y~~}{>>glose:v1 id=abcdef by=agent<<}{>>neuf 😀<<}{>>glose:v1 id=ghijkm re=abcdef by=author<<} b"},
+		{"\ufeffL’{>>été<<}\r\nsuite\r\n{++x++}", 0, "hiver\r\nlong", "\ufeffL’{>>hiver\r\nlong<<}\r\nsuite\r\n{++x++}"},
+	}
+	for _, c := range cases {
+		src := []byte(c.src)
+		marks, _ := critic.Parse(src)
+		a := critic.Group(marks)[0]
+		members := append([]int{a.Main}, a.Comments...)
+		idx := members[c.nth]
+		out := apply(t, src, res(Amend(src, marks, a, idx, c.text)))
+		if string(out) != c.want {
+			t.Errorf("Amend(%q, %q) = %q, attendu %q", c.src, c.text, out, c.want)
+		}
+	}
+}
+
+func TestAmendRefusals(t *testing.T) {
+	cases := []struct {
+		src  string
+		nth  int
+		text string
+		want error
+	}{
+		{"{>>a<<}", 0, "a", ErrUnchanged},
+		{"{>>a<<}", 0, "", ErrEmpty},
+		{"{>>a<<}", 0, "b <<} c", ErrDelimiter},
+		{"{>>a<<}", 0, "b {++c", ErrDelimiter},
+		{"{++a++}{>>b<<}", 0, "c", ErrKind},      // the proposal itself
+		{"{==a==}{>>b<<}", 0, "c", ErrKind},      // the highlighted passage itself
+		{"{>>a {++b++} c<<}", 0, "d", ErrNested}, // a nested mark: read-only
+	}
+	for _, c := range cases {
+		src := []byte(c.src)
+		marks, _ := critic.Parse(src)
+		a := critic.Group(marks)[0]
+		members := append([]int{a.Main}, a.Comments...)
+		if _, err := Amend(src, marks, a, members[c.nth], c.text); !errors.Is(err, c.want) {
+			t.Errorf("Amend(%q, %q) : erreur %v, attendu %v", c.src, c.text, err, c.want)
+		}
+	}
+	// A mark of another annotation is refused.
+	src := []byte("{>>a<<} b {>>c<<}")
+	marks, _ := critic.Parse(src)
+	if _, err := Amend(src, marks, critic.Group(marks)[0], 1, "d"); !errors.Is(err, ErrKind) {
+		t.Errorf("commentaire d'une autre annotation : erreur %v", err)
+	}
+}
+
+// FuzzAmend rewrites every comment of random texts: a rewriting is either
+// refused, or changes only that comment, and every other mark keeps its kind.
+func FuzzAmend(f *testing.F) {
+	f.Add([]byte("a {==b==}{>>c<<}{>>d<<} e {>>f<<} {++g++}{>>h<<}"), "nouveau")
+	f.Add([]byte("{>> {++x<< ++} {~~a~>b"), "<")
+	f.Fuzz(func(t *testing.T, src []byte, text string) {
+		marks, _ := critic.Parse(src)
+		for _, a := range critic.Group(marks) {
+			for _, idx := range append([]int{a.Main}, a.Comments...) {
+				e, err := Amend(src, marks, a, idx, text)
+				if err != nil {
+					continue
+				}
+				if e.Start != marks[idx].Span.Start || e.End != marks[idx].Span.End {
+					t.Fatalf("la réécriture déborde du commentaire : %+v", e)
+				}
+				out := e.Apply(src)
+				faithful(t, src, out, e)
+				after, _ := critic.Parse(out)
+				if len(after) != len(marks) {
+					t.Fatalf("nombre de marques changé : %q → %q", src, out)
+				}
+				for i := range after {
+					if after[i].Kind != marks[i].Kind {
+						t.Fatalf("type de marque changé : %q → %q", src, out)
+					}
+				}
+			}
+		}
+	})
+}

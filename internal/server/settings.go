@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/ptitan/glose/internal/agents"
 	"github.com/ptitan/glose/internal/store"
 )
 
@@ -36,13 +37,9 @@ func (st Settings) valid() bool {
 // settingsPath is ~/.config/glose/reglages.json (or the equivalent of the
 // system); GLOSE_CONFIG_DIR replaces the directory (tests).
 func settingsPath() (string, error) {
-	dir := os.Getenv("GLOSE_CONFIG_DIR")
-	if dir == "" {
-		base, err := os.UserConfigDir()
-		if err != nil {
-			return "", err
-		}
-		dir = filepath.Join(base, "glose")
+	dir, err := agents.ConfigDir()
+	if err != nil {
+		return "", err
 	}
 	return filepath.Join(dir, "reglages.json"), nil
 }

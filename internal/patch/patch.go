@@ -584,10 +584,41 @@ func Revise(src []byte, marks []critic.Mark, a critic.Annotation, text string) (
 // ErrSame is returned by Revise when the correction proposes nothing new.
 var ErrSame = errors.New("la correction ne change rien à la proposition")
 
-// verifyRevise checks the correction of a main mark (the range of e): after the edit, the
-// text holds the same marks (the main one replaced by the new one, the others
-// shifted), the same problems, and the same threads, the corrected annotation
-// keeping all its comments.
+// Amend rewrites one comment of annotation a, the mark at index in marks: the
+// main mark of a comment, or one of the comments of its thread. The comment
+// says text instead, at the same place, and nothing else changes: the other
+// comments, the technical comments (the identities) and the text around stay
+// byte for byte (D-04).
+func Amend(src []byte, marks []critic.Mark, a critic.Annotation, index int, text string) (Edit, error) {
+	if err := checkAnnotation(src, marks, a); err != nil {
+		return Edit{}, err
+	}
+	ok := index == a.Main && marks[a.Main].Kind == critic.Comment
+	for _, c := range a.Comments {
+		ok = ok || c == index
+	}
+	if !ok {
+		return Edit{}, fmt.Errorf("%w : la marque %d n'est pas un commentaire de cette annotation", ErrKind, index)
+	}
+	if err := checkText([]byte(text), false); err != nil {
+		return Edit{}, err
+	}
+	m := marks[index]
+	mark := wrap(critic.Comment, []byte(text))
+	if bytes.Equal(mark, src[m.Span.Start:m.Span.End]) {
+		return Edit{}, ErrUnchanged
+	}
+	return verifyRevise(src, Edit{Start: m.Span.Start, End: m.Span.End, Insert: mark})
+}
+
+// ErrUnchanged is returned by Amend when the comment would say the same.
+var ErrUnchanged = errors.New("le message est inchangé")
+
+// verifyRevise checks the replacement of one mark (the range of e) by one new
+// mark: the main mark of a corrected proposal, or an amended comment. After
+// the edit, the text holds the same marks (the one replaced by the new one,
+// the others shifted), the same problems, and the same threads, the edited
+// annotation keeping all its comments.
 func verifyRevise(src []byte, e Edit) (Edit, error) {
 	before, beforeIssues := critic.Parse(src)
 	inserted, insertedIssues := critic.Parse(e.Insert)

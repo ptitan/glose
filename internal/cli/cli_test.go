@@ -3,14 +3,18 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/ptitan/glose/internal/agents"
 	"github.com/ptitan/glose/internal/navette"
+	"github.com/ptitan/glose/internal/proc"
 	"github.com/ptitan/glose/internal/project"
+	"github.com/ptitan/glose/internal/server"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 )
 
@@ -402,5 +406,384 @@ func TestAnnotationContextOfALongParagraph(t *testing.T) {
 	c := annotationContext(src, at, at+len("{>>ici<<}"))
 	if !utf8.ValidString(c) || !strings.HasPrefix(c, "…") || !strings.HasSuffix(c, "…") || len(c) > contextMax+8 || strings.Contains(c, "Autre") {
 		t.Fatalf("contexte : %d octets, %q…", len(c), c[:min(len(c), 20)])
+	}
+}
+
+// P10.1: the commands of the agent leave a sign of life in .glose/agent.json,
+// and nothing else changes.
+func TestAgentSignOfLife(t *testing.T) {
+	t.Setenv("GLOSE_AGENT", "")
+	dir := mkproject(t, map[string]string{"a.md": "Un texte. Fin.\n"})
+	presence := func() *navette.Presence { return navette.ReadPresence(filepath.Join(dir, ".glose")) }
+	// The author's commands without a name leave no sign.
+	run("status", dir)
+	run("list", dir)
+	if p := presence(); p != nil {
+		t.Fatalf("signe sans agent : %+v", p)
+	}
+	if code, _, errOut := run("status", "--agent", "a\tb", dir); code != ExitUsage || !strings.Contains(errOut, "nom d'agent") {
+		t.Fatalf("nom invalide : %d %s", code, errOut)
+	}
+	if code, _, _ := run("wait", "--agent", "OpenCode", "--timeout", "50ms", dir); code != ExitTimeout {
+		t.Fatal(code)
+	}
+	if p := presence(); p == nil || p.Name != "OpenCode" || p.Activity != navette.ActWait {
+		t.Fatalf("wait : %+v", p)
+	}
+	// GLOSE_AGENT names the agent of status, which leaves a sign.
+	t.Setenv("GLOSE_AGENT", "Sol")
+	run("status", dir)
+	if p := presence(); p == nil || p.Name != "Sol" || p.Activity != navette.ActRead {
+		t.Fatalf("status : %+v", p)
+	}
+	t.Setenv("GLOSE_AGENT", "")
+	before, _ := os.ReadFile(filepath.Join(dir, "a.md"))
+	p, _ := project.Load(dir)
+	if _, err := navette.New(p).Handoff("author", ""); err != nil {
+		t.Fatal(err)
+	}
+	st, _, _, _ := navette.New(p).State()
+	if st.Agent == nil || st.Agent.Taken {
+		t.Fatalf("avant de prendre la main : %+v", st.Agent)
+	}
+	run("wait", "--agent", "OpenCode", "--timeout", "1s", dir)
+	st, _, _, _ = navette.New(p).State()
+	if st.Agent == nil || st.Agent.Name != "OpenCode" || !st.Agent.Taken || !st.Agent.Fresh {
+		t.Fatalf("main prise : %+v", st.Agent)
+	}
+	after, _ := os.ReadFile(filepath.Join(dir, "a.md"))
+	if !bytes.Equal(before, after) {
+		t.Fatal("le manuscrit a changé")
+	}
+	if code, _, errOut := run("comment", "--file", "a.md", "--after", "Fin.", "--text", "Ajout ?", "--agent", "OpenCode", dir); code != ExitOK {
+		t.Fatal(errOut)
+	}
+	if p := presence(); p.Activity != navette.ActWrite {
+		t.Fatalf("comment : %+v", p)
+	}
+	// Without a name, the agent is « agent ».
+	if code, _, errOut := run("done", dir); code != ExitOK {
+		t.Fatal(errOut)
+	}
+	if p := presence(); p.Name != "agent" || p.Activity != navette.ActDone {
+		t.Fatalf("done : %+v", p)
+	}
+}
+
+// P10.2, P10.12: « glose join » binds a session, then waits for the hand;
+// the same command waits for each turn.
+func TestJoin(t *testing.T) {
+	t.Setenv("GLOSE_AGENT", "")
+	t.Setenv("OPENCODE_SESSION_ID", "")
+	dir := mkproject(t, map[string]string{"a.md": "Un texte.\n"})
+	state := filepath.Join(dir, ".glose")
+	if code, _, errOut := run("join", dir); code != ExitUsage || !strings.Contains(errOut, "code") {
+		t.Fatalf("sans code : %d %s", code, errOut)
+	}
+	if code, _, errOut := run("join", "ABCD-EF", dir); code != ExitProblem || !strings.Contains(errOut, "aucun code") {
+		t.Fatalf("sans code en cours : %d %s", code, errOut)
+	}
+	l, err := navette.NewLink(state, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, _, errOut := run("join", "ZZZZ-ZZ", "--agent", "Codex", dir); code != ExitProblem || !strings.Contains(errOut, "ne correspond pas") {
+		t.Fatalf("faux code : %d %s", code, errOut)
+	}
+	if p := navette.ReadPresence(state); p != nil {
+		t.Fatalf("présence après un faux code : %+v", p)
+	}
+	// The hand is at the author: it binds, waits, then ends with code 3 and
+	// the command to run again.
+	code, out, errOut := run("join", "--agent", "Claude Code", "--model", "claude-opus-5", "--timeout", "300ms", l.Code, dir)
+	if code != ExitTimeout || !strings.Contains(out, `Lié à la navette`) || !strings.Contains(out, "(modèle claude-opus-5)") ||
+		!strings.Contains(out, `Relancez exactement la même commande`) || !strings.Contains(out, `glose join `+l.Code+` --agent "Claude Code"`) {
+		t.Fatalf("join : %d %s %s", code, out, errOut)
+	}
+	if p := navette.ReadPresence(state); p == nil || p.Name != "Claude Code" || p.Activity != navette.ActWait || p.Model != "claude-opus-5" || p.ModelSource != navette.ModelDeclared {
+		t.Fatalf("présence : %+v", p)
+	}
+	// Another agent cannot take the code.
+	if code, _, errOut := run("join", l.Code, "--agent", "Codex", dir); code != ExitProblem || !strings.Contains(errOut, "déjà servi") {
+		t.Fatalf("autre agent : %d %s", code, errOut)
+	}
+	// Once the hand is handed over, the same command gives the turn.
+	p, _ := project.Load(dir)
+	navette.New(p).Handoff("author", "")
+	code, out, _ = run("join", l.Code, "--agent", "Claude Code", dir)
+	if code != ExitOK || strings.Contains(out, "Lié à la navette") || !strings.Contains(out, "La main est à vous") || !strings.Contains(out, "## Navette Glose") ||
+		!strings.Contains(out, "Puis relancez glose join "+l.Code) {
+		t.Fatalf("tour : %d %s", code, out)
+	}
+	if code, _, _ := run("join", "--model", "a b", l.Code, dir); code != ExitUsage {
+		t.Fatal("modèle invalide accepté")
+	}
+}
+
+// P10.9: a session bound while an agent launched by Glose works waits for
+// the next turn, and never erases the presence of that agent.
+func TestJoinWhileALaunchedAgentWorks(t *testing.T) {
+	t.Setenv("GLOSE_AGENT", "")
+	t.Setenv("OPENCODE_SESSION_ID", "")
+	dir := mkproject(t, map[string]string{"a.md": "Un texte.\n"})
+	state := filepath.Join(dir, ".glose")
+	p, _ := project.Load(dir)
+	navette.New(p).Handoff("author", "")
+	pid := os.Getpid()
+	navette.TouchLaunched(state, "opus", 2, pid, proc.Identity(pid), time.Now().Add(time.Minute), "claude-agent/claude-opus-5")
+	l, _ := navette.NewLink(state, time.Now())
+	code, out, _ := run("join", l.Code, "--agent", "OpenCode", "--timeout", "300ms", dir)
+	if code != ExitTimeout || !strings.Contains(out, "opus, lancé par Glose, mène le tour en cours") {
+		t.Fatalf("%d %s", code, out)
+	}
+	if pr := navette.ReadPresence(state); pr.Name != "opus" || !pr.Launched {
+		t.Fatalf("présence de l'agent lancé effacée : %+v", pr)
+	}
+	// Its run over without handing back, the turn stays its own (reserved
+	// by Glose before the handover): the bound session waits for the next
+	// handover (Codex audit).
+	h, _ := navette.New(p).History()
+	navette.SetOwner(state, navette.Owner{Turn: h.Turn(), Kind: navette.OwnerLaunch, Name: "opus", ID: "r1"})
+	navette.ClearLaunched(state, pid)
+	if code, _, _ := run("join", l.Code, "--agent", "OpenCode", "--timeout", "300ms", dir); code != ExitTimeout {
+		t.Fatalf("main prise dans le tour de l'agent lancé : %d", code)
+	}
+	navette.New(p).Reclaim("", true)
+	navette.New(p).Handoff("author", "")
+	if code, out, _ := run("join", l.Code, "--agent", "OpenCode", "--timeout", "2s", dir); code != ExitOK || !strings.Contains(out, "La main est à vous") {
+		t.Fatalf("%d %s", code, out)
+	}
+	// A new code ends the binding: the old command stops at once.
+	navette.NewLink(state, time.Now())
+	if code, _, errOut := run("join", l.Code, "--agent", "OpenCode", "--timeout", "2s", dir); code != ExitProblem || !strings.Contains(errOut, "ne correspond pas") {
+		t.Fatalf("ancien code : %d %s", code, errOut)
+	}
+}
+
+// Codex audit: one wait at a time for a code; a new code ends the wait of
+// the old one; binding and model are written once the launched agent is gone.
+func TestJoinWaitIsAlone(t *testing.T) {
+	t.Setenv("GLOSE_AGENT", "")
+	t.Setenv("OPENCODE_SESSION_ID", "")
+	dir := mkproject(t, map[string]string{"a.md": "Un texte.\n"})
+	state := filepath.Join(dir, ".glose")
+	l, _ := navette.NewLink(state, time.Now())
+	first := make(chan string, 1)
+	go func() {
+		_, out, errOut := run("join", l.Code, "--agent", "Sol", "--timeout", "3s", dir)
+		first <- out + errOut
+	}()
+	time.Sleep(700 * time.Millisecond)
+	if code, _, errOut := run("join", l.Code, "--agent", "Sol", "--timeout", "1s", dir); code != ExitProblem || !strings.Contains(errOut, "attend déjà") {
+		t.Fatalf("seconde attente : %d %s", code, errOut)
+	}
+	navette.NewLink(state, time.Now())
+	if out := <-first; !strings.Contains(out, "nouveau code de liaison") {
+		t.Fatalf("première attente : %s", out)
+	}
+}
+
+// P10.3: until « glose set », Glose says that no agent is configured.
+func TestNoAgentConfigured(t *testing.T) {
+	t.Setenv("GLOSE_CONFIG_DIR", t.TempDir())
+	t.Setenv("PATH", t.TempDir())
+	dir := mkproject(t, map[string]string{"a.md": "Un texte.\n"})
+	if _, out, _ := run("status", dir); !strings.Contains(out, "Aucun agent configuré : lancez « glose set »") {
+		t.Fatalf("status : %s", out)
+	}
+	if _, out, _ := run("set", "--list"); !strings.Contains(out, "Claude Code : non trouvé") || !strings.Contains(out, "Aucun agent configuré") {
+		t.Fatalf("set --list : %s", out)
+	}
+	if _, out, _ := run("doctor", dir); !strings.Contains(out, "aucun agent configuré") || !strings.Contains(out, "lancez glose set") {
+		t.Fatalf("doctor : %s", out)
+	}
+	if _, err := agents.Save(agents.Config{Aliases: []agents.Alias{{Name: "Sol", Agent: "codex", Model: "gpt-6.1-sol"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, out, _ := run("status", dir); strings.Contains(out, "Aucun agent configuré") {
+		t.Fatalf("status configuré : %s", out)
+	}
+	if _, out, _ := run("set", "--list"); !strings.Contains(out, "Sol : Codex, gpt-6.1-sol (par défaut)") {
+		t.Fatalf("set --list configuré : %s", out)
+	}
+}
+
+// P10.3: check warns when the short name asked by the text is unknown here.
+func TestCheckWarnsOfAnUnknownAlias(t *testing.T) {
+	t.Setenv("GLOSE_CONFIG_DIR", t.TempDir())
+	dir := mkproject(t, map[string]string{"a.md": "Un texte.\n", "glose.json": `{"agent":{"alias":"Sol"}}`})
+	if _, out, _ := run("check", dir); !strings.Contains(out, `nom court "Sol", inconnu sur cette machine`) {
+		t.Fatalf("%s", out)
+	}
+	agents.Save(agents.Config{Aliases: []agents.Alias{{Name: "sol", Agent: "codex"}}})
+	if _, out, _ := run("check", dir); strings.Contains(out, "inconnu sur cette machine") {
+		t.Fatalf("%s", out)
+	}
+}
+
+// Codex review: after « done », the agent is not taken for one that waits.
+func TestDoneIsNotListening(t *testing.T) {
+	t.Setenv("GLOSE_AGENT", "")
+	dir := mkproject(t, map[string]string{"a.md": "Un texte.\n"})
+	p, _ := project.Load(dir)
+	navette.New(p).Handoff("author", "")
+	if code, _, errOut := run("done", "--agent", "Codex", dir); code != ExitOK {
+		t.Fatal(errOut)
+	}
+	st, _, _, _ := navette.New(p).State()
+	if st.Agent == nil || !st.Agent.Fresh || st.Agent.Listening {
+		t.Fatalf("%+v", st.Agent)
+	}
+	run("wait", "--agent", "Codex", "--timeout", "50ms", dir)
+	st, _, _, _ = navette.New(p).State()
+	if !st.Agent.Listening {
+		t.Fatalf("après wait : %+v", st.Agent)
+	}
+}
+
+// P10.6 (D-49): recipients and signatures in the command line.
+func TestRecipientsAndPasses(t *testing.T) {
+	t.Setenv("GLOSE_CONFIG_DIR", t.TempDir())
+	t.Setenv("GLOSE_AGENT", "")
+	t.Setenv(navette.PassEnv, "")
+	agents.Save(agents.Config{Aliases: []agents.Alias{{Name: "Sol", Agent: "codex"}, {Name: "Luna", Agent: "opencode"}}})
+	dir := mkproject(t, map[string]string{"a.md": "Premier{>>Défaut.<<}{>>glose:v1 id=aaaa by=author<<} et second{>>Pour Luna.<<}{>>glose:v1 id=bbbb by=author to=Luna<<} et troisième{>>Inconnu.<<}{>>glose:v1 id=cccc by=author to=Mars<<}.\n"})
+	ids := func(args ...string) string {
+		_, out, errOut := run(append([]string{"list", "--json"}, append(args, dir)...)...)
+		var l struct{ Annotations []struct{ ID, To string } }
+		if err := json.Unmarshal([]byte(out), &l); err != nil {
+			t.Fatalf("%s %s", out, errOut)
+		}
+		var s []string
+		for _, a := range l.Annotations {
+			s = append(s, a.ID+":"+a.To)
+		}
+		return strings.Join(s, ",")
+	}
+	// Without recipient, or with one unknown here (Mars): the default, Sol.
+	if got := ids("--to", "sol"); got != "aaaa:,cccc:Mars" {
+		t.Fatalf("--to sol : %s", got)
+	}
+	if got := ids("--to", "Luna"); got != "bbbb:Luna" {
+		t.Fatalf("--to Luna : %s", got)
+	}
+	if code, _, _ := run("list", "--to", "Sol Levant", dir); code != ExitUsage {
+		t.Fatal("nom invalide accepté")
+	}
+	p, _ := project.Load(dir)
+	navette.New(p).Handoff("author", "")
+	// The agent signs what it writes (via=), from its name.
+	if code, _, errOut := run("reply", "--id", "bbbb", "--text", "Vu.", "--agent", "Claude Code", dir); code != ExitOK {
+		t.Fatal(errOut)
+	}
+	b, _ := os.ReadFile(filepath.Join(dir, "a.md"))
+	if !strings.Contains(string(b), "via=Claude-Code<<}") {
+		t.Fatalf("%s", b)
+	}
+	// A turn with passes: Luna is launched by Glose; the bound session sees
+	// the rest (--mine), and its done closes its part.
+	h, _ := navette.New(p).History()
+	navette.WritePasses(p.State(), &navette.Passes{ID: "plan", Turn: h.Turn(), Linked: "Claude Code",
+		Passes: []navette.Pass{{Alias: "Luna", Agent: "opencode", State: navette.PassRunning, IDs: []string{"bbbb"}}}})
+	if got := ids("--mine"); strings.Contains(got, "bbbb") || !strings.Contains(got, "aaaa") || !strings.Contains(got, "cccc") {
+		t.Fatalf("--mine : %s", got)
+	}
+	// The routing is fixed: Luna removed from glose set meanwhile still
+	// sees her annotation.
+	agents.Save(agents.Config{Aliases: []agents.Alias{{Name: "Sol", Agent: "codex"}}})
+	if got := ids("--to", "Luna"); got != "bbbb:Luna" {
+		t.Fatalf("--to Luna figé : %s", got)
+	}
+	agents.Save(agents.Config{Aliases: []agents.Alias{{Name: "Sol", Agent: "codex"}, {Name: "Luna", Agent: "opencode"}}})
+	if _, out, _ := run("wait", "--agent", "Claude Code", "--timeout", "1s", dir); !strings.Contains(out, "glose list --json --mine") {
+		t.Fatalf("wait : %s", out)
+	}
+	t.Setenv(navette.PassEnv, "Luna")
+	if code, out, errOut := run("done", "--agent", "Luna", "--note", "Fait.", dir); code != ExitOK || !strings.Contains(out, "passage est clos") {
+		t.Fatalf("done du passage : %d %s %s", code, out, errOut)
+	}
+	if code, _, errOut := run("done", "--agent", "Luna", dir); code != ExitProblem || !strings.Contains(errOut, "aucun passage Luna") {
+		t.Fatalf("second done du passage : %d %s", code, errOut)
+	}
+	t.Setenv(navette.PassEnv, "")
+	if code, out, _ := run("done", "--agent", "Claude Code", "--note", "Ma part.", dir); code != ExitOK || !strings.Contains(out, "passage est clos") {
+		t.Fatalf("done de la session liée : %s", out)
+	}
+	if h, _ := navette.New(p).History(); h.Hand() != "agent" {
+		t.Fatal("la main a été remise par un passage")
+	}
+	if ps := navette.ReadPasses(p.State()); ps.Passes[0].Note != "Fait." || !ps.LinkedDone || ps.LinkedNote != "Ma part." {
+		t.Fatalf("%+v", ps)
+	}
+	// Its part closed, the bound session does not hand over the whole turn.
+	if code, _, errOut := run("done", "--agent", "Claude Code", dir); code != ExitProblem || !strings.Contains(errOut, "déjà close") {
+		t.Fatalf("second done de la session liée : %d %s", code, errOut)
+	}
+	// Without passes, done hands over as usual.
+	navette.WritePasses(p.State(), nil)
+	if code, out, _ := run("done", "--agent", "Claude Code", dir); code != ExitOK || !strings.Contains(out, "remise à l'auteur") {
+		t.Fatalf("done ordinaire : %s", out)
+	}
+}
+
+func TestViaName(t *testing.T) {
+	for in, want := range map[string]string{"agent": "", "Sol": "Sol", "Claude Code": "Claude-Code", "Évite": "vite", "a/b": "ab", strings.Repeat("x", 40): strings.Repeat("x", 32)} {
+		if got := viaName(in); got != want {
+			t.Errorf("%q : %q, attendu %q", in, got, want)
+		}
+	}
+}
+
+// Real use (P10.7): the token of the server is never shown to an agent.
+func TestStatusHidesTheTokenFromAnAgent(t *testing.T) {
+	t.Setenv("GLOSE_AGENT", "")
+	t.Setenv("GLOSE_CONFIG_DIR", t.TempDir())
+	t.Setenv("GLOSE_NO_BROWSER", "1")
+	dir := mkproject(t, map[string]string{"a.md": "Un texte.\n"})
+	p, _ := project.Load(dir)
+	done := make(chan error, 1)
+	go func() { done <- server.Serve(p) }()
+	for end := time.Now().Add(5 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		if _, err := server.Running(p.State()); err == nil {
+			break
+		}
+		if time.Now().After(end) {
+			t.Fatal("serveur non lancé")
+		}
+	}
+	defer func() { run("stop", dir); <-done }()
+	if _, out, _ := run("status", dir); !strings.Contains(out, "#t=") {
+		t.Fatalf("auteur : %s", out)
+	}
+	if _, out, _ := run("status", "--agent", "Sol", dir); strings.Contains(out, "#t=") || !strings.Contains(out, "Serveur : en marche, http://127.0.0.1:") {
+		t.Fatalf("agent : %s", out)
+	}
+	if _, out, _ := run("status", "--json", "--agent", "Sol", dir); strings.Contains(out, "#t=") {
+		t.Fatalf("agent, JSON : %s", out)
+	}
+}
+
+// P10.11: the messages of the agent carry its model: GLOSE_MODEL (an agent
+// launched by Glose), else the one recorded at glose join.
+func TestAgentSignsItsModel(t *testing.T) {
+	t.Setenv("GLOSE_AGENT", "")
+	t.Setenv("GLOSE_MODEL", "")
+	dir := mkproject(t, map[string]string{"a.md": "Un{>>Pourquoi ?<<}{>>glose:v1 id=aaaa by=author<<} texte.\n"})
+	p, _ := project.Load(dir)
+	navette.New(p).Handoff("author", "")
+	navette.TouchJoined(p.State(), "OpenCode", 2, "ABCDEF", "claude-agent/opus#high", navette.ModelByAgent)
+	if code, _, errOut := run("reply", "--id", "aaaa", "--text", "Parce que.", "--agent", "OpenCode", dir); code != ExitOK {
+		t.Fatal(errOut)
+	}
+	t.Setenv("GLOSE_MODEL", "gpt-6.1-sol")
+	if code, _, errOut := run("reply", "--id", "aaaa", "--text", "Et encore.", "--agent", "Sol", dir); code != ExitOK {
+		t.Fatal(errOut)
+	}
+	b, _ := os.ReadFile(filepath.Join(dir, "a.md"))
+	if !strings.Contains(string(b), "via=OpenCode model=claude-agent/opus#high<<}") || !strings.Contains(string(b), "via=Sol model=gpt-6.1-sol<<}") {
+		t.Fatalf("%s", b)
+	}
+	if _, out, _ := run("list", dir); !strings.Contains(out, "(OpenCode, claude-agent/opus#high) Parce que.") {
+		t.Fatalf("%s", out)
 	}
 }

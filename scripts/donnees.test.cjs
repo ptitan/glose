@@ -79,6 +79,7 @@ test("bilan : libellés au singulier et au pluriel", () => {
   assert.equal(D.bilan([{ kind: "track" }, { kind: "decide", closed: [{ decision: "accept" }, { decision: "reject" }, { decision: "reject" }] }]),
     "modifications du texte converties en propositions ; décisions : 1 acceptée, 2 rejetées");
   assert.equal(D.bilan([{ kind: "identify" }]), "");
+  assert.equal(D.bilan([{ kind: "comment" }, { kind: "amend" }, { kind: "amend" }]), "1 commentaire, 2 messages modifiés");
 });
 
 test("quand et heure : relatifs à l'instant donné", () => {

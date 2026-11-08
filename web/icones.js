@@ -1,5 +1,5 @@
 /*! Icônes de Glose : Lucide 1.70.0 (https://lucide.dev), recopiées par tools/gen-icones/gen.py.
-    Noms d'origine : relecture = file-diff, actuel = file-text, propose = file-check, annuler = undo-2, retablir = redo-2, reglages = a-large-small, remettre = send, reprendre = log-in, lien = link, note = superscript, tableau = table, liste = list, repondre = reply, corriger = pencil, rejeter = x, accepter = check, retirer = trash, resoudre = circle-check, commenter = message-square, suggerer = pencil-line, plus = plus, avant = arrow-up-to-line, apres = arrow-down-to-line, paragraphe = pilcrow, titre = heading-2, encadre = text-quote, image = image, code = code, tout-accepter = check-check, alerte = triangle-exclamation-point, a-relire = circle-dashed, en-cours = circle-dot, relue = circle-check, o-sommaire = list-tree, o-fichiers = folder-tree, o-annotations = messages-square, o-navette = arrow-left-right, a-dossier = folder, a-dossier-ouvert = folder-open, a-fichier = file-text, a-projet = book-open, a-chevron = chevron-right.
+    Noms d'origine : relecture = file-diff, actuel = file-text, propose = file-check, annuler = undo-2, retablir = redo-2, reglages = a-large-small, remettre = send, reprendre = log-in, lien = link, note = superscript, tableau = table, liste = list, repondre = reply, corriger = pencil, rejeter = x, accepter = check, retirer = trash, resoudre = circle-check, commenter = message-square, suggerer = pencil-line, plus = plus, avant = arrow-up-to-line, apres = arrow-down-to-line, paragraphe = pilcrow, titre = heading-2, encadre = text-quote, image = image, code = code, tout-accepter = check-check, alerte = triangle-exclamation-point, a-relire = circle-dashed, en-cours = circle-dot, relue = circle-check, o-sommaire = list-tree, o-fichiers = folder-tree, o-annotations = messages-square, o-navette = arrow-left-right, a-dossier = folder, a-dossier-ouvert = folder-open, a-fichier = file-text, a-projet = book-open, a-chevron = chevron-right, chercher = search, colonne-fermer = panel-left-close, colonne-ouvrir = panel-left-open, brouillons = notebook-pen, vous = user, agent = sparkles, menu-capsule = chevron-down, copier = copy, arreter = circle-stop, sortie = terminal, configurer = settings, essayer = play, rafraichir = refresh-cw.
 
     ISC License
 
@@ -90,7 +90,20 @@ window.GloseIcones = (() => {
     "a-dossier-ouvert": "<path d=\"m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2\"/>",
     "a-fichier": "<path d=\"M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z\"/><path d=\"M14 2v5a1 1 0 0 0 1 1h5\"/><path d=\"M10 9H8\"/><path d=\"M16 13H8\"/><path d=\"M16 17H8\"/>",
     "a-projet": "<path d=\"M12 5v16\"/><path d=\"M20.001 19A2 2 0 0022 17V5a2 2 0 00-1.999-2L16 3.002A5 5 0 0012 5a5 5 0 00-4-2H4a2 2 0 00-2 2v12a2 2 0 001.999 2H8a5 5 0 014 2 5 5 0 014-2z\"/>",
-    "a-chevron": "<path d=\"m9 18 6-6-6-6\"/>"
+    "a-chevron": "<path d=\"m9 18 6-6-6-6\"/>",
+    "chercher": "<path d=\"m21 21-4.34-4.34\"/><circle cx=\"11\" cy=\"11\" r=\"8\"/>",
+    "colonne-fermer": "<rect width=\"18\" height=\"18\" x=\"3\" y=\"3\" rx=\"2\"/><path d=\"M9 3v18\"/><path d=\"m16 15-3-3 3-3\"/>",
+    "colonne-ouvrir": "<rect width=\"18\" height=\"18\" x=\"3\" y=\"3\" rx=\"2\"/><path d=\"M9 3v18\"/><path d=\"m14 9 3 3-3 3\"/>",
+    "brouillons": "<path d=\"M13.4 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7.4\"/><path d=\"M2 6h4\"/><path d=\"M2 10h4\"/><path d=\"M2 14h4\"/><path d=\"M2 18h4\"/><path d=\"M21.378 5.626a1 1 0 1 0-3.004-3.004l-5.01 5.012a2 2 0 0 0-.506.854l-.837 2.87a.5.5 0 0 0 .62.62l2.87-.837a2 2 0 0 0 .854-.506z\"/>",
+    "vous": "<path d=\"M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2\"/><circle cx=\"12\" cy=\"7\" r=\"4\"/>",
+    "agent": "<path d=\"M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z\"/><path d=\"M20 2v4\"/><path d=\"M22 4h-4\"/><circle cx=\"4\" cy=\"20\" r=\"2\"/>",
+    "menu-capsule": "<path d=\"m6 9 6 6 6-6\"/>",
+    "copier": "<rect width=\"14\" height=\"14\" x=\"8\" y=\"8\" rx=\"2\" ry=\"2\"/><path d=\"M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2\"/>",
+    "arreter": "<circle cx=\"12\" cy=\"12\" r=\"10\"/><rect x=\"9\" y=\"9\" width=\"6\" height=\"6\" rx=\"1\"/>",
+    "sortie": "<path d=\"M12 19h8\"/><path d=\"m4 17 6-6-6-6\"/>",
+    "configurer": "<path d=\"M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/>",
+    "essayer": "<path d=\"M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z\"/>",
+    "rafraichir": "<path d=\"M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8\"/><path d=\"M21 3v5h-5\"/><path d=\"M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16\"/><path d=\"M8 16H3v5\"/>"
   };
   const svg = (nom) => '<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">' + (traces[nom] || "") + "</svg>";
   const remplir = (racine) => {

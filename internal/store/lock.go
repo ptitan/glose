@@ -46,8 +46,14 @@ func TryLockNamed(dir, name string) (*Lock, error) {
 
 // WaitLock takes the lock, waiting until it is free or ctx is done.
 func WaitLock(ctx context.Context, dir string) (*Lock, error) {
+	return WaitLockNamed(ctx, dir, LockName)
+}
+
+// WaitLockNamed takes the lock held in the file name of dir, waiting until
+// it is free or ctx is done.
+func WaitLockNamed(ctx context.Context, dir, name string) (*Lock, error) {
 	for {
-		l, err := TryLock(dir)
+		l, err := TryLockNamed(dir, name)
 		if !errors.Is(err, ErrLocked) {
 			return l, err
 		}

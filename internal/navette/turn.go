@@ -33,7 +33,27 @@ var ErrFiles = errors.New("un fichier du projet est illisible")
 // file is kept (D-25), and the turn event records the files, their hashes and
 // the active annotations.
 func (n *Navette) Handoff(actor, note string) (*Handover, error) {
-	return n.handover(actor, actor, note, false, false)
+	return n.handover(actor, actor, note, false, false, 0, nil)
+}
+
+// HandoffThen is Handoff, with then called under the lock of the project
+// once every check has passed, just before the turn event, with the number
+// of the turn that begins: an error cancels the handover; the function it
+// returns undoes its writes if the event cannot be written. It records what
+// must hold from the very moment the hand changes (the owner of the agent's
+// turn, a plan of passes, P10.6 and P10.9).
+func (n *Navette) HandoffThen(actor, note string, then func(next int) (undo func(), err error)) (*Handover, error) {
+	return n.handover(actor, actor, note, false, false, 0, then)
+}
+
+// ErrTurnChanged means that the turn expected by HandoffTurn is over.
+var ErrTurnChanged = errors.New("le tour attendu est terminé")
+
+// HandoffTurn is Handoff if the turn in progress is still turn, checked
+// under the lock (the passes of P10.6: a turn reclaimed then handed again
+// is not closed by the old passes).
+func (n *Navette) HandoffTurn(actor, note string, turn int) (*Handover, error) {
+	return n.handover(actor, actor, note, false, false, turn, nil)
 }
 
 // Reclaim lets the author take the hand back while the agent has it: the
@@ -42,12 +62,12 @@ func (n *Navette) Handoff(actor, note string) (*Handover, error) {
 // they are, without being converted (when the conversion fails and the agent
 // cannot fix it).
 func (n *Navette) Reclaim(note string, force bool) (*Handover, error) {
-	return n.handover(review.Author, review.Agent, note, true, force)
+	return n.handover(review.Author, review.Agent, note, true, force, 0, nil)
 }
 
 // handover runs a handover for the turn of owner (whose changes are
 // processed), recorded as done by actor.
-func (n *Navette) handover(actor, owner, note string, reclaimed, force bool) (*Handover, error) {
+func (n *Navette) handover(actor, owner, note string, reclaimed, force bool, expect int, then func(next int) (func(), error)) (*Handover, error) {
 	lock, err := n.Lock(lockWait)
 	if err != nil {
 		return nil, err
@@ -60,13 +80,16 @@ func (n *Navette) handover(actor, owner, note string, reclaimed, force bool) (*H
 	if err != nil {
 		return nil, err
 	}
+	if expect > 0 && h.Turn() != expect {
+		return nil, ErrTurnChanged
+	}
 	// A handover covers the whole project as it is now (D-38), not the files
 	// known when this navette was made: computed under the lock.
 	sc, err := n.Scope(h)
 	if err != nil {
 		return nil, err
 	}
-	return New(sc).locked(h, actor, owner, note, reclaimed, force)
+	return New(sc).locked(h, actor, owner, note, reclaimed, force, then)
 }
 
 // Scope returns the project that a handover covers (D-38): the project read
@@ -116,7 +139,7 @@ func (n *Navette) Scope(h *History) (*project.Project, error) {
 }
 
 // locked runs a handover under the lock, n being the scope of the handover.
-func (n *Navette) locked(h *History, actor, owner, note string, reclaimed, force bool) (*Handover, error) {
+func (n *Navette) locked(h *History, actor, owner, note string, reclaimed, force bool, then func(next int) (func(), error)) (*Handover, error) {
 	if h.Hand() != owner {
 		if owner == review.Author {
 			return nil, ErrAgentTurn
@@ -214,8 +237,19 @@ func (n *Navette) locked(h *History, actor, owner, note string, reclaimed, force
 			return nil, fmt.Errorf("copies de remise non synchronisées sur le disque : %w", err)
 		}
 	}
+	undo := func() {}
+	if then != nil {
+		u, err := then(h.Turn() + 1)
+		if err != nil {
+			return nil, err
+		}
+		if u != nil {
+			undo = u
+		}
+	}
 	evs, err := n.J.Append(journal.Event{Type: journal.Turn, Actor: owner, TurnEv: info})
 	if err != nil {
+		undo()
 		return nil, err
 	}
 	res.Event = evs[0]

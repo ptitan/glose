@@ -13,7 +13,12 @@ const binary = path.resolve(process.env.GLOSE_BIN || path.join(__dirname, '../..
 const ordinary = '# Essai\n\nLe **mot important** dans une phrase ordinaire.\n\nLe chat dort.\n\nUn café e\u0301, emoji 👩🏽‍💻 et drapeau 🇫🇷.\n\nDernier paragraphe.\n';
 
 class Project {
-  constructor(dir) { this.dir = dir; this.env = { ...process.env, GLOSE_CONFIG_DIR: path.join(dir, 'reglages') }; }
+  constructor(dir) {
+    this.dir = dir;
+    // Rien de la session de l'hôte : ni nom d'agent, ni modèle, ni session OpenCode.
+    this.env = { ...process.env, GLOSE_CONFIG_DIR: path.join(dir, 'reglages') };
+    for (const k of ['GLOSE_AGENT', 'GLOSE_MODEL', 'GLOSE_PASS', 'OPENCODE_SESSION_ID']) delete this.env[k];
+  }
   async start() {
     this.log = ''; this.child = spawn(binary, ['serve', this.dir], { env: this.env, stdio: ['ignore', 'ignore', 'pipe'] });
     this.child.stderr.on('data', (b) => { this.log += b; });
@@ -98,6 +103,76 @@ const scenarios = [
     assert.match((await p.read()).toString(), /\{==👩🏽‍💻==\}/);
     await focusText(page); await page.key('z', 2); await waitCards(page, 0);
     assert.deepEqual(await p.read(), original);
+  }],
+  ['modifier son commentaire et sa réponse, annuler, rétablir, puis remettre', async ({ p, page }) => {
+    const carte = () => page.evaluate(() => document.querySelector('#marge .carte')?.textContent || '');
+    await openComment(page, 'Le chat dort.'); await page.fill('#saisie-texte', 'Premier jet.'); await page.click('#saisie-ok');
+    await page.wait('commentaire enregistré', () => !document.getElementById('saisie').open); await waitCards(page, 1);
+    await page.click('#marge button[aria-label="Modifier"]');
+    await page.wait('panneau Modifier prérempli', () => document.getElementById('saisie').open && document.getElementById('saisie-texte').value === 'Premier jet.');
+    await page.fill('#saisie-texte', 'Version revue.'); await page.click('#saisie-ok');
+    await page.wait('commentaire modifié', () => !document.getElementById('saisie').open && /Version revue\./.test(document.querySelector('#marge .carte')?.textContent || ''));
+    assert.match((await p.read()).toString(), /\{==Le chat dort\.==\}\{>>Version revue\.<<\}\{>>glose:v1 id=\w+ by=author<<\}/);
+    await page.click('#marge button[aria-label="Répondre"]'); await page.wait('panneau Répondre', () => document.getElementById('saisie').open);
+    await page.fill('#saisie-texte', 'Ma réponse.'); await page.click('#saisie-ok');
+    await page.wait('réponse enregistrée', () => !document.getElementById('saisie').open && /Ma réponse\./.test(document.querySelector('#marge .carte')?.textContent || ''));
+    await page.wait('capsule : 1 commentaire et 1 réponse à remettre', () => document.querySelector('#puces .comments b')?.textContent === '1' && document.querySelector('#puces .replies b')?.textContent === '1' && !document.querySelector('#puces .proposals'));
+    await page.click('#marge button[aria-label="Modifier votre réponse"]');
+    await page.wait('réponse préremplie', () => document.getElementById('saisie').open && document.getElementById('saisie-texte').value === 'Ma réponse.');
+    await page.fill('#saisie-texte', 'Réponse revue.'); await page.click('#saisie-ok');
+    await page.wait('réponse modifiée', () => !document.getElementById('saisie').open && /Réponse revue\./.test(document.querySelector('#marge .carte')?.textContent || ''));
+    const revue = await p.read();
+    assert.match(revue.toString(), /\{>>Version revue\.<<\}\{>>glose:v1 [^<]+<<\}\{>>Réponse revue\.<<\}\{>>glose:v1 [^<]+<<\}/);
+    await focusText(page); await page.key('z', 2);
+    await page.wait('modification annulée', () => /Ma réponse\./.test(document.querySelector('#marge .carte')?.textContent || ''));
+    assert.equal((await p.read()).toString(), revue.toString().replace('Réponse revue.', 'Ma réponse.'), 'annuler rend le texte précédent, rien d’autre');
+    await focusText(page); await page.key('y', 2);
+    await page.wait('modification rétablie', () => /Réponse revue\./.test(document.querySelector('#marge .carte')?.textContent || ''));
+    assert.deepEqual(await p.read(), revue);
+    await page.click('#marge button[aria-label="Retirer votre réponse"]'); await page.wait('confirmation du retrait', () => document.getElementById('boite').open);
+    await page.click('#boite-ok'); await page.wait('réponse retirée', () => !/Réponse revue\./.test(document.querySelector('#marge .carte')?.textContent || ''));
+    assert.ok(!(await p.read()).toString().includes('Réponse revue.'));
+    const log = JSON.parse(p.cli('log', '--json'));
+    const versions = log.turns.flatMap((t) => t.operations || []).filter((o) => o.kind === 'amend').flatMap((o) => o.revised || []).map((r) => r.text);
+    assert.deepEqual(versions, ['Premier jet.', 'Ma réponse.', 'Réponse revue.', 'Ma réponse.'], 'versions précédentes au journal');
+    // Remis puis repris : le commentaire appartient à la discussion, il ne se modifie plus.
+    await page.click('#remettre'); await page.wait('remise ouverte', () => document.getElementById('remise').open); await page.click('#remise-ok');
+    await page.wait('main à l’agent', () => document.body.classList.contains('main-agent'));
+    await page.click('#remettre'); await page.wait('reprise ouverte', () => document.getElementById('remise').open); await page.click('#remise-ok');
+    await page.wait('main reprise', () => !document.body.classList.contains('main-agent')); await waitCards(page, 1);
+    assert.ok(!(await page.evaluate(() => !!document.querySelector('#marge button[aria-label="Modifier"]'))), 'plus de Modifier après la remise');
+    assert.match(await carte(), /Version revue\./);
+  }],
+  ['barre du haut : colonne repliée, rail, recherche au clavier, pied de page', async ({ p, page }) => {
+    const visible = (id) => page.evaluate((id) => !document.getElementById(id).hidden && getComputedStyle(document.getElementById(id)).display !== 'none', id);
+    assert.match(await page.evaluate(() => document.getElementById('etat').textContent), /1 fichier · 0 annotation · rendu en \d+ ms/);
+    assert.ok(await page.evaluate(() => { const r = document.getElementById('pied').getBoundingClientRect(); return Math.abs(r.bottom - innerHeight) < 2; }), 'pied de page en bas de la fenêtre');
+    await page.click('#bouton-sommaire');
+    await page.wait('colonne repliée', () => document.getElementById('cote').hidden && !document.getElementById('rail').hidden);
+    await page.navigate(p.state.url); await waitCards(page, 0);
+    assert.ok(await visible('rail') && !(await visible('cote')), 'colonne repliée retenue');
+    await page.click('#rail button[data-rail="annotations"]');
+    await page.wait('onglet Annotations depuis le rail', () => !document.getElementById('cote').hidden && document.getElementById('onglet-annotations').getAttribute('aria-selected') === 'true');
+    await focusText(page); await page.key('0', 1);
+    await page.wait('Alt+0 replie', () => document.getElementById('cote').hidden);
+    await focusText(page); await page.key('0', 1);
+    await page.wait('Alt+0 rouvre', () => !document.getElementById('cote').hidden);
+    // La barre reste en haut quand le texte défile.
+    await page.evaluate(() => { document.getElementById('texte').style.minHeight = '3000px'; window.scrollTo(0, 800); });
+    await page.wait('barre collante', () => Math.abs(document.getElementById('barre').getBoundingClientRect().top) < 1 && document.body.classList.contains('defile'));
+    await page.evaluate(() => { document.getElementById('texte').style.minHeight = ''; window.scrollTo(0, 0); });
+    // Recherche : la saisie reste dans le champ ; flèches, Entrée, Échap.
+    await page.click('#recherche-texte'); await page.fill('#recherche-texte', 'chat');
+    await page.wait('résultats sous le champ', () => !document.getElementById('recherche').hidden && document.querySelectorAll('.resultat-recherche').length === 1);
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'recherche-texte', 'la saisie reste dans le champ');
+    await page.key('ArrowDown');
+    assert.ok(await page.evaluate(() => document.activeElement.classList.contains('resultat-recherche')), 'flèche vers le premier résultat');
+    await page.key('Escape');
+    await page.wait('Échap replie', () => document.getElementById('recherche').hidden && document.activeElement.id === 'recherche-texte');
+    await page.key('Enter');
+    await page.wait('Entrée relance', () => !document.getElementById('recherche').hidden && document.querySelectorAll('.resultat-recherche').length === 1);
+    await page.key('ArrowDown'); await page.key('Enter');
+    await page.wait('résultat ouvert', () => document.getElementById('recherche').hidden && document.querySelector('#texte .g-recherche')?.textContent === 'chat');
   }],
   ['édition visuelle, source, aperçu, décisions et annulation', async ({ p, page }) => {
     const original = await p.read();
@@ -208,6 +283,214 @@ const scenarios = [
     assert.ok(await page.evaluate(() => document.querySelectorAll('#historique .remise-heure').length >= 3), 'remises datées');
     await page.click('#historique g.noeud.agent');
     await page.wait('détail d’une main', () => /suggestion|converties|Rien d'écrit/.test(document.querySelector('#historique .frise-detail')?.textContent || ''));
+  }],
+  ['présence de l’agent dans la capsule (P10.1)', async ({ p, page }) => {
+    const original = await p.read();
+    const presence = (activity, ago) => p.write(JSON.stringify({ name: 'OpenCode', since: new Date(Date.now() - ago).toISOString(),
+      seen: new Date(Date.now() - ago).toISOString(), activity, turn: 0 }), '.glose/agent.json');
+    const capsule = () => page.evaluate(() => ({ text: document.getElementById('navette').textContent,
+      absent: document.getElementById('carte-tour').classList.contains('absent') }));
+    await presence('wait', 0);
+    await page.wait('agent qui attend', () => /OpenCode attend/.test(document.getElementById('navette').textContent));
+    assert.equal((await capsule()).absent, false);
+    await presence('wait', 120000);
+    await page.wait('plus personne', () => /Aucun agent (à l’écoute|à l'écoute|configuré)/.test(document.getElementById('navette').textContent));
+    assert.ok(await page.evaluate(() => document.querySelector('#navette small.absent') !== null), 'mention orange');
+    await page.click('#remettre'); await page.wait('remise ouverte', () => document.getElementById('remise').open);
+    assert.ok(await page.evaluate(() => !document.getElementById('remise-alerte').hidden), 'avertissement de remise');
+    await page.click('#remise-ok');
+    await page.wait('main à personne', () => document.body.classList.contains('main-agent') && document.getElementById('carte-tour').classList.contains('absent'));
+    p.cli('wait', '--agent', 'OpenCode', '--timeout', '5s');
+    await page.wait('main prise', () => /OpenCode a pris la main/.test(document.getElementById('navette').textContent));
+    assert.equal((await capsule()).absent, false);
+    p.cli('comment', '--file', 'a.md', '--after', 'Dernier paragraphe.', '--text', 'Une remarque.', '--agent', 'OpenCode');
+    await page.wait('agent qui écrit', () => /OpenCode travaille · 1 commentaire/.test(document.getElementById('navette').textContent));
+    p.cli('done', '--agent', 'OpenCode');
+    await page.wait('main rendue', () => !document.body.classList.contains('main-agent')); await waitCards(page, 1);
+    // Seul le commentaire de l'agent s'ajoute au manuscrit.
+    assert.equal((await p.read()).toString().replace(/\{>>[^]*?<<\}/g, ''), original.toString());
+  }],
+  ['lier une session d’agent par un code (P10.2)', async ({ p, page }) => {
+    const original = await p.read();
+    await page.click('#menu-navette-bouton'); await page.wait('menu de la capsule', () => !document.getElementById('menu-navette').hidden);
+    await page.click('#m-lier');
+    await page.wait('consigne prête', () => document.getElementById('lien').open && /glose join [A-Z2-9]{4}-[A-Z2-9]{2}/.test(document.getElementById('lien-consigne').value));
+    const consigne = await page.evaluate(() => document.getElementById('lien-consigne').value);
+    assert.ok(consigne.includes(p.dir), 'dossier du projet dans la consigne');
+    await page.click('#lien-copier');
+    const code = consigne.match(/glose join ([A-Z2-9]{4}-[A-Z2-9]{2})/)[1];
+    // Un autre agent qui attend n'est pas l'agent lié par ce code (revue de Codex).
+    spawnSync(binary, ['wait', '--agent', 'Autre', '--timeout', '100ms'], { cwd: p.dir, env: p.env });
+    await page.wait('autre agent vu', () => /Autre attend/.test(document.getElementById('navette').textContent));
+    assert.doesNotMatch(await page.evaluate(() => document.getElementById('lien-etat').textContent), /lié/);
+    // P10.10 : prête à coller ; P10.12 : join attend la remise, puis « délai écoulé » (code 3).
+    assert.ok(consigne.includes('--agent "agent"') && !consigne.includes('TON NOM') && /relance-la telle quelle/.test(consigne), 'consigne prête à coller');
+    const joint = spawnSync(binary, ['join', code, '--agent', 'OpenCode', '--timeout', '1s'], { cwd: p.dir, env: p.env, encoding: 'utf8' });
+    assert.equal(joint.status, 3, joint.stdout + joint.stderr);
+    await page.wait('agent lié', () => /OpenCode est lié/.test(document.getElementById('lien-etat').textContent));
+    await page.wait('capsule', () => /OpenCode attend/.test(document.getElementById('navette').textContent));
+    // Un code sert une fois.
+    const again = spawnSync(binary, ['join', code], { cwd: p.dir, env: p.env, encoding: 'utf8' });
+    assert.equal(again.status, 1, again.stderr);
+    await page.click('#lien-fermer'); await page.wait('panneau fermé', () => !document.getElementById('lien').open);
+    // Depuis la boîte de remise.
+    await page.click('#remettre'); await page.wait('remise ouverte', () => document.getElementById('remise').open);
+    await page.click('#remise-lier');
+    await page.wait('nouveau code', () => document.getElementById('lien').open && !document.getElementById('remise').open && /glose join/.test(document.getElementById('lien-consigne').value));
+    assert.ok(!(await page.evaluate(() => document.getElementById('lien-consigne').value)).includes(code), 'nouveau code');
+    await page.click('#lien-fermer');
+    assert.deepEqual(await p.read(), original);
+  }],
+  ['réglages des agents : glose set et « Aucun agent configuré » (P10.3)', async ({ p, page }) => {
+    const original = await p.read();
+    await page.wait('aucun agent configuré', () => /Aucun agent configuré/.test(document.getElementById('navette').textContent) &&
+      !document.getElementById('configurer-agents').hidden);
+    await page.navigate(`http://127.0.0.1:${p.state.port}/set#t=${p.state.token}`, '#ra-detectes li');
+    await page.wait('page des agents', () => document.querySelectorAll('#ra-detectes li').length >= 3 && /Aucun agent configuré/.test(document.getElementById('ra-alias').textContent));
+    await page.click('#ra-ajouter');
+    await page.fill('.ra-ligne .ra-nom', 'Sol');
+    await page.evaluate(() => { const s = document.querySelector('.ra-ligne .ra-agent'); s.value = 'codex'; s.dispatchEvent(new Event('change')); });
+    await page.fill('.ra-ligne .ra-modele', 'gpt-essai');
+    await page.click('#ra-enregistrer');
+    await page.wait('enregistré', () => /Enregistré/.test(document.getElementById('ra-statut').textContent));
+    const conf = JSON.parse(await fs.readFile(path.join(p.env.GLOSE_CONFIG_DIR, 'agents.json'), 'utf8'));
+    assert.deepEqual([conf.default, conf.aliases], ['Sol', [{ name: 'Sol', agent: 'codex', model: 'gpt-essai' }]]);
+    // Un nom court invalide est refusé, la saisie reste.
+    await page.click('#ra-ajouter');
+    await page.evaluate(() => { const n = document.querySelectorAll('.ra-ligne .ra-nom'); n[1].value = 'Sol Levant'; n[1].dispatchEvent(new Event('input')); });
+    await page.click('#ra-enregistrer');
+    await page.wait('refus', () => /nom court invalide/.test(document.getElementById('ra-statut').textContent));
+    assert.equal(await page.evaluate(() => document.querySelectorAll('.ra-ligne').length), 2);
+    await page.evaluate(() => document.querySelectorAll('.ra-ligne button[aria-label="Retirer ce nom court"]')[1].click());
+    await page.click('#ra-enregistrer');
+    await page.wait('réenregistré', () => /Enregistré/.test(document.getElementById('ra-statut').textContent));
+    await page.navigate(p.state.url);
+    await page.wait('agent configuré', () => /Aucun agent à l’écoute|Aucun agent à l'écoute/.test(document.getElementById('navette').textContent) &&
+      document.getElementById('configurer-agents').hidden);
+    assert.deepEqual(await p.read(), original);
+  }],
+  ['outils requis et essai d’un faux agent (P10.4)', async ({ p, page }) => {
+    // Un faux codex : aucun vrai agent n'est lancé par les essais.
+    const bin = path.join(p.dir, '..', path.basename(p.dir) + '-bin');
+    await fs.mkdir(bin, { recursive: true });
+    await fs.writeFile(path.join(bin, 'codex'), '#!/bin/sh\nif [ "$1" = mcp ]; then echo "lexharness  enabled"; exit 0; fi\necho "faux codex : $*"; cat\n', { mode: 0o755 });
+    await p.stop();
+    p.env = { ...p.env, PATH: bin + path.delimiter + process.env.PATH };
+    await p.write(JSON.stringify({ agent: { alias: 'Sol', requires: ['mcp:lexharness', 'skill:inexistant'] } }), 'glose.json');
+    await fs.mkdir(p.env.GLOSE_CONFIG_DIR, { recursive: true });
+    await fs.writeFile(path.join(p.env.GLOSE_CONFIG_DIR, 'agents.json'), JSON.stringify({ version: 1, default: 'Sol', aliases: [{ name: 'Sol', agent: 'codex', model: 'gpt-essai' }] }));
+    await p.start();
+    await page.navigate(`http://127.0.0.1:${p.state.port}/set#t=${p.state.token}`, '#ra-detectes li');
+    await page.wait('ce texte', () => !document.getElementById('ra-projet').hidden && /Sol/.test(document.getElementById('ra-projet-texte').textContent));
+    await page.click('#ra-verifier');
+    await page.wait('outils vérifiés', () => document.querySelectorAll('#ra-outils li.present').length === 1 && document.querySelectorAll('#ra-outils li.absent').length === 1);
+    await page.click('.ra-ligne .ra-essayer');
+    await page.wait('essai terminé', () => /faux codex : exec .*-s read-only.*-m gpt-essai/.test(document.getElementById('ra-essai-sortie').textContent) &&
+      /glose status/.test(document.getElementById('ra-essai-sortie').textContent));
+    assert.match(await page.evaluate(() => document.getElementById('ra-essai-etat').textContent), /Terminé/);
+  }],
+  ['Glose lance l’agent à la remise (P10.5)', async ({ p, page }) => {
+    const original = (await p.read()).toString();
+    const bin = path.join(p.dir, '..', path.basename(p.dir) + '-bin');
+    const crash = path.join(bin, 'plante');
+    await fs.mkdir(bin, { recursive: true });
+    await fs.writeFile(path.join(bin, 'codex'), ['#!/bin/sh', 'cat > /dev/null', 'echo "faux codex : $*"',
+      'if [ -f "$GLOSE_TEST_CRASH" ]; then echo plantage; exit 3; fi', 'sleep 2',
+      'glose comment --file a.md --after "Dernier paragraphe." --text "Vu par $GLOSE_AGENT."', 'glose done --note "Fait."', ''].join('\n'), { mode: 0o755 });
+    await p.stop();
+    p.env = { ...p.env, PATH: bin + path.delimiter + process.env.PATH, GLOSE_TEST_CRASH: crash };
+    await fs.mkdir(p.env.GLOSE_CONFIG_DIR, { recursive: true });
+    await fs.writeFile(path.join(p.env.GLOSE_CONFIG_DIR, 'agents.json'), JSON.stringify({ version: 1, default: 'Sol', aliases: [{ name: 'Sol', agent: 'codex', model: 'gpt-essai' }] }));
+    await p.start(); await page.navigate(p.state.url);
+    await page.click('#remettre'); await page.wait('remise ouverte', () => document.getElementById('remise').open);
+    assert.ok(await page.evaluate(() => !document.getElementById('remise-lancement').hidden && document.getElementById('remise-lancer').checked &&
+      /Lancer Sol \(Codex, gpt-essai\)/.test(document.getElementById('remise-lancer-texte').textContent)), 'case Lancer cochée');
+    assert.ok(await page.evaluate(() => document.getElementById('remise-alerte').hidden), 'pas d’avertissement quand l’agent est lancé');
+    await page.click('#remise-ok');
+    await page.wait('agent lancé', () => /Sol · gpt-essai travaille/.test(document.getElementById('navette').textContent));
+    await page.click('#menu-navette-bouton'); await page.click('#m-sortie');
+    await page.wait('sortie de l’agent', () => document.getElementById('sortie').open && /faux codex : exec/.test(document.getElementById('sortie-texte').textContent));
+    await page.click('#sortie-fermer');
+    await page.wait('main rendue par l’agent lancé', () => !document.body.classList.contains('main-agent')); await waitCards(page, 1);
+    assert.match((await p.read()).toString(), /Vu par Sol\./);
+    // Second tour : l'agent plante ; la capsule le dit, on le relance.
+    await fs.writeFile(crash, '');
+    await page.click('#remettre'); await page.wait('seconde remise', () => document.getElementById('remise').open); await page.click('#remise-ok');
+    await page.wait('arrêté sans remettre', () => /Sol( · gpt-essai)? s’est arrêté sans remettre|Sol( · gpt-essai)? s'est arrêté sans remettre/.test(document.getElementById('navette').textContent) &&
+      document.getElementById('carte-tour').classList.contains('absent'));
+    await fs.rm(crash);
+    await page.click('#menu-navette-bouton');
+    await page.wait('relance proposée', () => !document.getElementById('m-lancer').hidden);
+    await page.click('#m-lancer');
+    await page.wait('main rendue après relance', () => !document.body.classList.contains('main-agent'));
+    assert.equal((await p.read()).toString().replace(/\{>>[^]*?<<\}/g, ''), original);
+  }],
+  ['destinataires : Réponse par, @Nom, deux agents à la suite (P10.6)', async ({ p, page }) => {
+    const bin = path.join(p.dir, '..', path.basename(p.dir) + '-bin');
+    await fs.mkdir(bin, { recursive: true });
+    // Deux faux agents : chacun commente après sa phrase, signé, puis clôt son passage.
+    const faux = ['#!/bin/sh', 'cat > /dev/null', 'case "$GLOSE_AGENT" in Sol) apres="Le chat dort." ;; *) apres="Dernier paragraphe." ;; esac',
+      'glose comment --file a.md --after "$apres" --text "Réponse de $GLOSE_AGENT."', 'glose done --note "fait par $GLOSE_AGENT"', ''].join('\n');
+    for (const nom of ['codex', 'opencode']) await fs.writeFile(path.join(bin, nom), faux, { mode: 0o755 });
+    await p.stop();
+    p.env = { ...p.env, PATH: bin + path.delimiter + process.env.PATH };
+    await fs.mkdir(p.env.GLOSE_CONFIG_DIR, { recursive: true });
+    await fs.writeFile(path.join(p.env.GLOSE_CONFIG_DIR, 'agents.json'), JSON.stringify({ version: 1, default: 'Sol',
+      aliases: [{ name: 'Sol', agent: 'codex' }, { name: 'Luna', agent: 'opencode', model: 'x/y' }] }));
+    await p.start(); await page.navigate(p.state.url);
+    await openComment(page, 'mot important');
+    assert.ok(await page.evaluate(() => !document.getElementById('saisie-pour-ligne').hidden &&
+      [...document.getElementById('saisie-pour').options].map((o) => o.textContent).join('|') === 'Par défaut (Sol)|Luna|Sol'), 'Réponse par');
+    await page.fill('#saisie-texte', 'Pour le défaut.'); await page.click('#saisie-ok'); await waitCards(page, 1);
+    await openComment(page, 'drapeau');
+    await page.fill('#saisie-texte', '@luna Pour Luna.'); await page.click('#saisie-ok'); await waitCards(page, 2);
+    const src = (await p.read()).toString();
+    assert.match(src, /\{>>Pour Luna\.<<\}\{>>glose:v1 id=\w+ by=author to=Luna<<\}/, '@Nom retiré, to=Luna écrit');
+    assert.doesNotMatch(src, /Pour le défaut\.<<\}\{>>glose:v1 id=\w+ by=author to=/);
+    assert.ok(await page.evaluate(() => [...document.querySelectorAll('#marge .carte .pour')].map((e) => e.textContent).join() === '→ Luna'), 'destinataire sur la carte');
+    await page.click('#remettre'); await page.wait('remise ouverte', () => document.getElementById('remise').open); await page.click('#remise-ok');
+    await page.wait('main rendue après les deux passages', () => !document.body.classList.contains('main-agent')); await waitCards(page, 4);
+    const fin = (await p.read()).toString();
+    assert.ok(fin.indexOf('Réponse de Sol.') > 0 && fin.indexOf('Réponse de Luna.') > 0 && /via=Sol/.test(fin) && /via=Luna/.test(fin), 'deux passages signés');
+    assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('#marge .carte .msg .qui')].map((e) => e.textContent).filter((t) => /^(Sol|Luna)/.test(t)).sort()), ['Luna · y', 'Sol'], 'signatures sur les cartes, avec le modèle');
+    const log = JSON.parse(p.cli('log', '--json'));
+    assert.match(log.turns.at(-1).note || log.turns.at(-2).note, /Sol : fait par Sol[^]*Luna : fait par Luna/);
+  }],
+  ['cartes longues repliées, dépliées par-dessus les autres (P9.4)', async ({ p, page }) => {
+    const long = Array.from({ length: 30 }, (_, i) => 'Ligne ' + (i + 1) + ' d’une très longue remarque.').join(' ');
+    await openComment(page, 'mot important'); await page.fill('#saisie-texte', long); await page.click('#saisie-ok'); await waitCards(page, 1);
+    // Même phrase : les deux cartes s'empilent (audit de Codex).
+    await openComment(page, 'phrase ordinaire'); await page.fill('#saisie-texte', 'Courte.'); await page.click('#saisie-ok'); await waitCards(page, 2);
+    await page.evaluate(() => document.getElementById('texte').click());
+    const mesure = () => page.evaluate(() => [...document.querySelectorAll('#marge .carte')].map((c) =>
+      ({ h: c.offsetHeight, top: c.offsetTop, longue: c.classList.contains('longue'), active: c.classList.contains('active'), texte: c.textContent })));
+    await page.wait('repliée', () => document.querySelector('#marge .carte.longue') !== null);
+    const avant = await mesure();
+    const iLong = avant.findIndex((c) => c.texte.includes('Ligne 30')), iCourt = avant.findIndex((c) => c.texte.includes('Courte.'));
+    assert.ok(avant[iLong].longue && avant[iLong].h <= 172 && !avant[iCourt].longue, 'longue repliée : ' + JSON.stringify(avant));
+    // Le texte entier reste dans le document (lecteurs d'écran).
+    assert.ok(avant[iLong].texte.includes('Ligne 30'));
+    assert.ok(avant[iCourt].top >= avant[iLong].top + avant[iLong].h, 'cartes empilées');
+    await page.evaluate((i) => document.querySelectorAll('#marge .carte')[i].click(), iLong);
+    await page.wait('dépliée', (i) => document.querySelectorAll('#marge .carte')[i].offsetHeight > 200, iLong);
+    await new Promise((r) => setTimeout(r, 300)); // la disposition suit d'une image
+    const apres = await mesure();
+    assert.equal(apres[iCourt].top, avant[iCourt].top, 'la voisine ne bouge pas, au pixel près');
+    // Par-dessus : au point de la voisine recouverte, c'est la carte dépliée qui est visible.
+    const dessus = await page.evaluate((i, j) => {
+      const cs = document.querySelectorAll('#marge .carte'), r = cs[j].getBoundingClientRect(), longue = cs[i].getBoundingClientRect();
+      if (longue.bottom <= r.top) return 'sans recouvrement';
+      const el = document.elementFromPoint(r.left + 20, Math.min(r.top + 10, longue.bottom - 5));
+      return cs[i].contains(el) ? 'dessus' : 'dessous';
+    }, iLong, iCourt);
+    assert.notEqual(dessus, 'dessous');
+    // Une autre carte choisie : la longue se replie.
+    await page.evaluate((j) => document.querySelectorAll('#marge .carte')[j].click(), iCourt);
+    await page.wait('repliée de nouveau', (i) => document.querySelectorAll('#marge .carte')[i].offsetHeight <= 172, iLong);
+    // Le focus clavier qui entre dans la carte longue la déplie.
+    await page.evaluate((i) => document.querySelectorAll('#marge .carte')[i].focus(), iLong);
+    await page.wait('dépliée au focus', (i) => document.querySelectorAll('#marge .carte')[i].classList.contains('active') &&
+      document.querySelectorAll('#marge .carte')[i].offsetHeight > 200, iLong);
   }],
   ['brouillons : rechargement, nouveau port et ordre des fichiers', async ({ p, page }) => {
     const original = await p.read();
@@ -329,7 +612,7 @@ const scenarios = [
     await page.click('#onglet-fichiers');
     await page.evaluate(() => [...document.querySelectorAll('#fichiers a.partie')].find((a) => a.textContent === 'a').click());
     await page.wait('recherche depuis a', () => document.querySelector('#texte .rendu:not(.garde) .glose-file')?.dataset.path === 'a.md');
-    await page.click('#bouton-recherche');
+    await page.click('#recherche-texte');
     await page.fill('#recherche-texte', 'CIBLE INTROUVABLE');
     await page.wait('résultat global', () => document.querySelectorAll('.resultat-recherche').length === 1);
     if (process.env.GLOSE_KEEP_BROWSER_TESTS === '1') await fs.writeFile(path.join(p.dir, 'recherche.png'), Buffer.from((await page.send('Page.captureScreenshot')).data, 'base64'));
@@ -339,10 +622,10 @@ const scenarios = [
     assert.equal(await page.evaluate(() => !!document.querySelector('#texte .g-recherche')), false);
     await p.write(b, 'chapitre/b espace.md');
     await focusText(page); await page.key('f', 10);
-    await page.wait('raccourci de recherche globale', () => document.getElementById('recherche').open);
+    await page.wait('raccourci de recherche globale', () => !document.getElementById('recherche').hidden && document.activeElement.id === 'recherche-texte');
     await page.wait('résultat actualisé', () => document.querySelectorAll('.resultat-recherche').length === 1);
     await page.click('.resultat-recherche');
-    await page.wait('résultat ouvert et surligné', () => !document.getElementById('recherche').open && document.querySelector('#texte .g-recherche')?.textContent === 'Cible');
+    await page.wait('résultat ouvert et surligné', () => document.getElementById('recherche').hidden && document.querySelector('#texte .g-recherche')?.textContent === 'Cible');
     assert.equal((await p.read()).toString(), a);
     assert.equal((await p.read('chapitre/b espace.md')).toString(), b);
     await openComment(page, 'Cible introuvable');

@@ -31,6 +31,10 @@ ICONES = {
     "o-navette": "arrow-left-right",
     "a-dossier": "folder", "a-dossier-ouvert": "folder-open", "a-fichier": "file-text",
     "a-projet": "book-open", "a-chevron": "chevron-right",
+    "chercher": "search", "colonne-fermer": "panel-left-close", "colonne-ouvrir": "panel-left-open",
+    "brouillons": "notebook-pen", "vous": "user", "agent": "sparkles",
+    "menu-capsule": "chevron-down", "copier": "copy", "arreter": "circle-stop", "sortie": "terminal",
+    "configurer": "settings", "essayer": "play", "rafraichir": "refresh-cw",
 }
 
 # Éléments colorés : (icône, tracé exact) -> classe.

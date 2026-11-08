@@ -15,6 +15,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/ptitan/glose/internal/agents"
 	"github.com/ptitan/glose/internal/project"
 	"github.com/ptitan/glose/internal/render"
 	"github.com/ptitan/glose/internal/server"
@@ -122,6 +123,16 @@ func doctor(path string) []doctorFinding {
 			fix = "activez l'interopérabilité de WSL ([interop] enabled=true et appendWindowsPath=true dans /etc/wsl.conf, puis wsl --shutdown), ou installez wslu (sudo apt install wslu) ; à défaut, ouvrez vous-même l'adresse affichée par glose open"
 		}
 		inst("warning", "navigateur", err.Error()+" : glose open affichera l'adresse sans ouvrir le navigateur", fix)
+	}
+
+	// Agents (P10.3): a warning, Glose works without them.
+	if c, err := agents.Load(); err != nil {
+		inst("warning", "agents", err.Error(), "corrigez ou supprimez ce fichier, puis lancez glose set")
+	} else if !c.Configured() {
+		inst("warning", "agents", "aucun agent configuré : Glose ne sait pas quel agent lancer ni nommer", "lancez glose set")
+	} else {
+		a, _ := c.Alias(c.Default)
+		inst("ok", "agents", fmt.Sprintf("par défaut : %s (%s)", a.Name, aliasDesc(a)), "")
 	}
 
 	// Project.

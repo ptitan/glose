@@ -40,6 +40,17 @@ type Result struct {
 // journal and writes it. kind names the operation in the journal; decision
 // what the closing of an annotation means.
 func (n *Navette) Do(actor string, file int, hash, kind, decision string, compute Compute) (*Result, error) {
+	return n.DoWith(actor, file, hash, kind, decision, func(src []byte, gen *review.Gen, _ *History) (patch.Edit, error) {
+		return compute(src, gen)
+	})
+}
+
+// ComputeWith is Compute, given also the history read under the lock (to
+// know, for instance, what the last handover gave to the other party).
+type ComputeWith func(src []byte, gen *review.Gen, h *History) (patch.Edit, error)
+
+// DoWith is Do, with the history passed to compute.
+func (n *Navette) DoWith(actor string, file int, hash, kind, decision string, compute ComputeWith) (*Result, error) {
 	if file < 0 || file >= len(n.P.Files) {
 		return nil, ErrFile
 	}
@@ -69,7 +80,7 @@ func (n *Navette) Do(actor string, file int, hash, kind, decision string, comput
 		return nil, ErrConflict
 	}
 	gen := n.Gen(n.ReadFiles(), h)
-	e, err := compute(d.Bytes, gen)
+	e, err := compute(d.Bytes, gen, h)
 	if err != nil {
 		return nil, err
 	}

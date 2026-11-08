@@ -1048,3 +1048,110 @@ func TestEditAsOneProposal(t *testing.T) {
 		t.Fatalf("accepter : %d %q", w.Code, got)
 	}
 }
+
+// P9.1 : l'auteur modifie son commentaire et sa réponse tant qu'ils n'ont pas
+// été remis ; le journal garde la version précédente ; une fois remis, le
+// message ne se modifie plus.
+func TestAmendOwnMessages(t *testing.T) {
+	needPandoc(t)
+	src := "Le chat dort.\n\nFin.\n"
+	s, dir := newServer(t, map[string]string{"a.md": src})
+	path := filepath.Join(dir, "a.md")
+	read := func() string { b, _ := os.ReadFile(path); return string(b) }
+	var resp map[string]any
+	post := func(route string, body map[string]any) int {
+		t.Helper()
+		w := do(t, s, "POST", route, body)
+		resp = map[string]any{}
+		json.Unmarshal(w.Body.Bytes(), &resp)
+		return w.Code
+	}
+	hash := getDoc(t, s).Files[0].Hash
+	if c := post("/api/comment", map[string]any{"file": 0, "hash": hash, "mode": "passage", "start": 3, "end": 7, "text": "Lequel ?"}); c != http.StatusOK {
+		t.Fatalf("commentaire : %d %v", c, resp)
+	}
+	before := read()
+	at := strings.Index(before, "{>>Lequel")
+	// Amended: only the text of the remark changes, identity included.
+	if c := post("/api/amend", map[string]any{"file": 0, "hash": resp["hash"], "start": at, "text": "Quel chat ?"}); c != http.StatusOK || resp["start"] != float64(at) {
+		t.Fatalf("modification : %d %v", c, resp)
+	}
+	if want := strings.Replace(before, "{>>Lequel ?<<}", "{>>Quel chat ?<<}", 1); read() != want {
+		t.Fatalf("après modification : %q, attendu %q", read(), want)
+	}
+	// The same text again: refused, nothing written.
+	if c := post("/api/amend", map[string]any{"file": 0, "hash": resp["hash"], "start": at, "text": "Quel chat ?"}); c != http.StatusUnprocessableEntity || resp["error"] != "same" {
+		t.Fatalf("modification identique : %d %v", c, resp)
+	}
+	// Spaces are kept as given (an undo restores the message exactly), then
+	// the message comes back.
+	resp["hash"] = getDoc(t, s).Files[0].Hash
+	for _, text := range []string{" Quel chat ? ", "Quel chat ?"} {
+		if c := post("/api/amend", map[string]any{"file": 0, "hash": resp["hash"], "start": at, "text": text}); c != http.StatusOK ||
+			!strings.Contains(read(), "{>>"+text+"<<}") {
+			t.Fatalf("modification %q : %d %v %q", text, c, resp, read())
+		}
+	}
+	if c := post("/api/amend", map[string]any{"file": 0, "hash": getDoc(t, s).Files[0].Hash, "start": at, "text": "  "}); c != http.StatusBadRequest {
+		t.Fatalf("message vide : %d %v", c, resp)
+	}
+	// A reply of the author, amended too.
+	hash = getDoc(t, s).Files[0].Hash
+	if c := post("/api/reply", map[string]any{"file": 0, "hash": hash, "start": 3, "text": "Précision."}); c != http.StatusOK {
+		t.Fatalf("réponse : %d %v", c, resp)
+	}
+	rep := resp["start"]
+	if c := post("/api/amend", map[string]any{"file": 0, "hash": resp["hash"], "start": rep, "text": "Autre précision."}); c != http.StatusOK ||
+		!strings.Contains(noMeta(read()), "{>>Quel chat ?<<}{>>Autre précision.<<}") {
+		t.Fatalf("modification de la réponse : %d %v %q", c, resp, read())
+	}
+	// The journal keeps both previous versions.
+	var lg struct{ Turns []navette.TurnLog }
+	json.Unmarshal(do(t, s, "GET", "/api/log", nil).Body.Bytes(), &lg)
+	var revised []string
+	for _, o := range lg.Turns[0].Ops {
+		for _, r := range o.Revised {
+			if o.Kind == "amend" && r.Kind == "message" {
+				revised = append(revised, r.Text)
+			}
+		}
+	}
+	if strings.Join(revised, "|") != "Lequel ?|Quel chat ?| Quel chat ? |Précision." {
+		t.Fatalf("versions précédentes : %v", revised)
+	}
+	// Each message carries its status: new before the handover.
+	var d struct {
+		Annotations []struct {
+			Messages []struct{ Status string } `json:"messages"`
+		} `json:"annotations"`
+	}
+	json.Unmarshal(do(t, s, "GET", "/api/doc", nil).Body.Bytes(), &d)
+	if len(d.Annotations) != 1 || len(d.Annotations[0].Messages) != 2 || d.Annotations[0].Messages[1].Status != "new" {
+		t.Fatalf("statuts : %+v", d)
+	}
+	// Handed over, then taken back: the messages are the agent's to read now.
+	if c := post("/api/handoff", map[string]any{"note": ""}); c != http.StatusOK {
+		t.Fatalf("remise : %d %v", c, resp)
+	}
+	if c := post("/api/reclaim", map[string]any{"note": ""}); c != http.StatusOK {
+		t.Fatalf("reprise : %d %v", c, resp)
+	}
+	handed := read()
+	hash = getDoc(t, s).Files[0].Hash
+	if c := post("/api/amend", map[string]any{"file": 0, "hash": hash, "start": at, "text": "Encore ?"}); c != http.StatusUnprocessableEntity || resp["error"] != "handed" {
+		t.Fatalf("modification d'un message remis : %d %v", c, resp)
+	}
+	if read() != handed {
+		t.Fatal("fichier modifié par un refus")
+	}
+	// A message of the agent cannot be amended by the author.
+	agent := strings.Replace(handed, "\n\nFin.", "{>>Agent.<<}{>>glose:v1 id=zyxwvu by=agent<<}\n\nFin.", 1)
+	os.WriteFile(path, []byte(agent), 0o644)
+	hash = getDoc(t, s).Files[0].Hash
+	if c := post("/api/amend", map[string]any{"file": 0, "hash": hash, "start": strings.Index(agent, "{>>Agent"), "text": "Moi."}); c != http.StatusUnprocessableEntity || resp["error"] != "refused" {
+		t.Fatalf("modification d'un message de l'agent : %d %v", c, resp)
+	}
+	if read() != agent {
+		t.Fatal("fichier modifié par un refus")
+	}
+}

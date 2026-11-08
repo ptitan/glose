@@ -95,7 +95,7 @@
     const mots = (k, un, plusieurs) => (n[k] ? n[k] + " " + (n[k] > 1 ? plusieurs : un) : "");
     const faits = [mots("comment", "commentaire", "commentaires"), mots("reply", "réponse", "réponses"),
       mots("propose", "suggestion", "suggestions"), n.converties ? "modifications du texte converties en propositions" : "",
-      mots("revise", "correction", "corrections"), mots("withdraw", "retrait", "retraits"), mots("undo", "décision annulée", "décisions annulées")].filter(Boolean);
+      mots("revise", "correction", "corrections"), mots("amend", "message modifié", "messages modifiés"), mots("withdraw", "retrait", "retraits"), mots("undo", "décision annulée", "décisions annulées")].filter(Boolean);
     const decisions = [mots("d-accept", "acceptée", "acceptées"), mots("d-reject", "rejetée", "rejetées"), mots("d-resolve", "résolue", "résolues")].filter(Boolean);
     return [faits.join(", "), decisions.length ? "décisions : " + decisions.join(", ") : ""].filter(Boolean).join(" ; ");
   }

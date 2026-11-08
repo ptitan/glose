@@ -836,7 +836,7 @@ func (t *tracker) takeThread(olds []unit) int {
 			if remark != nil {
 				t.copyBase(remark.offset, remark.b)
 				if id, err := t.gen.New(); err == nil {
-					t.out = append(t.out, review.Meta{ID: id, Re: m.ID, By: m.By}.Bytes()...)
+					t.out = append(t.out, review.Meta{ID: id, Re: m.ID, By: m.By, To: m.To}.Bytes()...)
 				}
 			}
 			return k + 1

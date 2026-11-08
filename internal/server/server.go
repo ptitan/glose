@@ -24,6 +24,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/ptitan/glose/internal/agentrun"
 	"github.com/ptitan/glose/internal/critic"
 	"github.com/ptitan/glose/internal/edit"
 	"github.com/ptitan/glose/internal/navette"
@@ -65,6 +66,47 @@ type Server struct {
 	// of the author, to undo them (see undecide).
 	undoMu sync.Mutex
 	undos  []undoEntry
+	// handMu guards hand: whose hand it is at a sequence number of the
+	// journal, so that the poll of the interface reads the presence of the
+	// agent (P10.1) without reading the whole journal each time.
+	handMu sync.Mutex
+	hand   handCache
+	// trying is set while a dry run of an agent runs (P10.4).
+	trying atomic.Bool
+	// runner launches the agent at the handover (P10.5).
+	runner    agentrun.Runner
+	launchErr string
+	// orch is the turn with several recipients in progress (P10.6).
+	orchMu sync.Mutex
+	orch   *orchestra
+}
+
+// handCache is the hand and the time of the last handover at seq.
+type handCache struct {
+	ok          bool
+	gen, seq    int64
+	hand, since string
+	turn        int
+}
+
+// handAt returns the hand and the time of the last handover when the last
+// event of the journal is seq.
+func (s *Server) handAt(c current, seq int64) (hand, since string, turn int) {
+	s.handMu.Lock()
+	defer s.handMu.Unlock()
+	if s.hand.ok && s.hand.seq == seq && s.hand.gen == c.Gen {
+		return s.hand.hand, s.hand.since, s.hand.turn
+	}
+	h, err := c.N.History()
+	if err != nil {
+		return "", "", 0
+	}
+	hand, turn = h.Hand(), h.Turn()
+	if l := h.Last(); l != nil {
+		since = l.Time
+	}
+	s.hand = handCache{ok: true, gen: c.Gen, seq: seq, hand: hand, since: since, turn: turn}
+	return hand, since, turn
 }
 
 // New returns a server for p, listening on port with token.
@@ -178,6 +220,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/comment", s.comment)
 	mux.HandleFunc("POST /api/withdraw", s.withdraw)
 	mux.HandleFunc("POST /api/reply", s.reply)
+	mux.HandleFunc("POST /api/amend", s.amend)
 	mux.HandleFunc("GET /api/block", s.blockText)
 	mux.HandleFunc("GET /api/passage", s.passageText)
 	mux.HandleFunc("POST /api/edit", s.editBlock)
@@ -192,6 +235,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/search", s.search)
 	mux.HandleFunc("POST /api/handoff", s.handoff)
 	mux.HandleFunc("POST /api/reclaim", s.reclaim)
+	mux.HandleFunc("POST /api/link", s.link)
+	s.agentRoutes(mux)
+	s.runRoutes(mux)
 	mux.HandleFunc("GET /api/progress", s.getProgress)
 	mux.HandleFunc("POST /api/progress", s.setProgress)
 	mux.HandleFunc("GET /api/drafts", s.getDrafts)
@@ -251,7 +297,7 @@ func public(r *http.Request) bool {
 		return false
 	}
 	p := r.URL.Path
-	return p == "/" || strings.HasPrefix(p, "/static/")
+	return p == "/" || p == "/set" || strings.HasPrefix(p, "/static/")
 }
 
 func (s *Server) tokenOK(t string) bool {
@@ -281,13 +327,15 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 }
 
 var staticTypes = map[string]string{"app.js": "text/javascript; charset=utf-8", "visuel.js": "text/javascript; charset=utf-8",
-	"brouillons.js": "text/javascript; charset=utf-8",
-	"donnees.js":    "text/javascript; charset=utf-8",
-	"navigation.js": "text/javascript; charset=utf-8",
-	"recherche.js":  "text/javascript; charset=utf-8",
-	"archives.js":   "text/javascript; charset=utf-8",
-	"icones.js":     "text/javascript; charset=utf-8",
-	"style.css":     "text/css; charset=utf-8"}
+	"brouillons.js":      "text/javascript; charset=utf-8",
+	"donnees.js":         "text/javascript; charset=utf-8",
+	"navigation.js":      "text/javascript; charset=utf-8",
+	"recherche.js":       "text/javascript; charset=utf-8",
+	"archives.js":        "text/javascript; charset=utf-8",
+	"agents.js":          "text/javascript; charset=utf-8",
+	"reglages-agents.js": "text/javascript; charset=utf-8",
+	"icones.js":          "text/javascript; charset=utf-8",
+	"style.css":          "text/css; charset=utf-8"}
 
 func (s *Server) static(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
@@ -365,7 +413,14 @@ func (s *Server) hashes(w http.ResponseWriter, r *http.Request) {
 	// reloads the state of the exchange when it changes (a handover without
 	// any change of the files, for instance).
 	seq, _ := c.N.J.LastSeq()
-	writeJSON(w, http.StatusOK, map[string]any{"files": files, "seq": seq, "filesGen": c.Gen})
+	// The presence of the agent changes without any change of the files or
+	// of the journal (P10.1): it comes with each poll.
+	hand, since, turn := s.handAt(c, seq)
+	out := map[string]any{"files": files, "seq": seq, "filesGen": c.Gen, "agent": c.N.Agent(hand, since)}
+	ai := s.agentInfoOf(c, turn)
+	out["agentsConfigured"], out["textAgent"], out["textRequires"], out["run"] = ai.AgentsConfigured, ai.TextAgent, ai.TextRequires, ai.Run
+	out["passes"], out["aliases"], out["link"], out["owner"] = ai.Passes, ai.Aliases, ai.Link, ai.Owner
+	writeJSON(w, http.StatusOK, out)
 }
 
 // docResponse is the rendered project, with the state of the exchange.
@@ -374,6 +429,7 @@ type docResponse struct {
 	State    navette.State `json:"state"`
 	Seq      int64         `json:"seq"`
 	FilesGen int64         `json:"filesGen"` // generation of the list of files (filesHeader)
+	agentInfo
 }
 
 func (s *Server) doc(w http.ResponseWriter, r *http.Request) {
@@ -415,7 +471,7 @@ func (s *Server) doc(w http.ResponseWriter, r *http.Request) {
 	if len(h.Events) > 0 {
 		seq = h.Events[len(h.Events)-1].Seq
 	}
-	writeJSON(w, http.StatusOK, docResponse{Doc: d, State: st, Seq: seq, FilesGen: c.Gen})
+	writeJSON(w, http.StatusOK, docResponse{Doc: d, State: st, Seq: seq, FilesGen: c.Gen, agentInfo: s.agentInfoOf(c, st.Turn)})
 }
 
 func (s *Server) state(w http.ResponseWriter, r *http.Request) {
@@ -443,6 +499,9 @@ func (s *Server) log(w http.ResponseWriter, r *http.Request) {
 type handoffRequest struct {
 	Note  string `json:"note"`
 	Force bool   `json:"force"` // reclaim: without converting the agent's changes
+	// Launch: launch the agent of the text (P10.5); absent, it is launched
+	// if one is configured and none listens.
+	Launch *bool `json:"launch"`
 }
 
 // handoff ends the author's turn (SPEC F13): the button « Remettre à l'agent ».
@@ -452,7 +511,18 @@ func (s *Server) handoff(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
-	s.handover(w, req, func(note string) (*navette.Handover, error) { return c.N.Handoff(review.Author, note) })
+	s.handover(w, req, func(note string) (*navette.Handover, error) {
+		// What Glose launches is decided first; the plan of passes and the
+		// owner of the turn are written in the transaction of the handover,
+		// under the lock of the project: a bound session that waits sees
+		// them as soon as it can take the hand (P10.6, P10.9).
+		next := s.beforeHandoff(c, req.Launch)
+		ho, err := c.N.HandoffThen(review.Author, note, func(turn int) (func(), error) { return s.prepareTurn(c, &next, turn) })
+		if err == nil {
+			s.afterHandoff(c, next)
+		}
+		return ho, err
+	})
 }
 
 // reclaim lets the author take the hand back while the agent has it.
@@ -489,18 +559,28 @@ func (s *Server) handover(w http.ResponseWriter, req handoffRequest, run func(st
 		jsonError(w, http.StatusInternalServerError, "handoff", err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "turn": ho.Event.TurnEv.Number, "identified": ho.Identified,
-		"converted": ho.Converted, "files": ho.Files})
+	out := map[string]any{"ok": true, "turn": ho.Event.TurnEv.Number, "identified": ho.Identified,
+		"converted": ho.Converted, "files": ho.Files}
+	if st, ok := s.runner.Status(s.cur().P.State()); ok {
+		out["run"] = st
+	}
+	if msg := s.lastLaunchError(); msg != "" {
+		out["launchError"] = msg
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // commentRequest is the intention sent by the interface.
 type commentRequest struct {
-	File  int    `json:"file"`
-	Hash  string `json:"hash"`
-	Mode  string `json:"mode"` // passage, point, paragraph
-	Start int    `json:"start"`
-	End   int    `json:"end"`
-	Text  string `json:"text"`
+	// Recipient is the short name of the agent that must answer (D-49,
+	// P10.6); "" for the default one. The key « to » is taken by /api/edit.
+	Recipient string `json:"recipient"`
+	File      int    `json:"file"`
+	Hash      string `json:"hash"`
+	Mode      string `json:"mode"` // passage, point, paragraph
+	Start     int    `json:"start"`
+	End       int    `json:"end"`
+	Text      string `json:"text"`
 }
 
 // maxNote bounds the length of a note, in bytes.
@@ -514,6 +594,10 @@ func (s *Server) comment(w http.ResponseWriter, r *http.Request) {
 	text := strings.TrimSpace(req.Text)
 	if text == "" || len(text) > maxNote || !utf8.ValidString(text) {
 		jsonError(w, http.StatusBadRequest, "text", "remarque vide, trop longue ou mal encodée")
+		return
+	}
+	r, ok := withRecipient(w, r, req.Recipient)
+	if !ok {
 		return
 	}
 	s.edit(w, r, req.File, req.Hash, "comment", "", func(src []byte, m *sourcemap.Map, gen *review.Gen) (patch.Edit, *apiError) {
@@ -603,6 +687,15 @@ func (s *Server) edit(w http.ResponseWriter, r *http.Request, file int, hash, ki
 // without its linked notes), instead of the range of the edit.
 func (s *Server) editAt(w http.ResponseWriter, r *http.Request, file int, hash string, at *critic.Span, kind, decision string,
 	compute func(src []byte, m *sourcemap.Map, gen *review.Gen) (patch.Edit, *apiError)) {
+	s.editWith(w, r, file, hash, at, kind, decision, func(src []byte, m *sourcemap.Map, gen *review.Gen, _ *navette.History) (patch.Edit, *apiError) {
+		return compute(src, m, gen)
+	})
+}
+
+// editWith is editAt, with the history of the exchange, read under the lock,
+// passed to compute.
+func (s *Server) editWith(w http.ResponseWriter, r *http.Request, file int, hash string, at *critic.Span, kind, decision string,
+	compute func(src []byte, m *sourcemap.Map, gen *review.Gen, h *navette.History) (patch.Edit, *apiError)) {
 	c, ok := s.curFor(w, r)
 	if !ok {
 		return
@@ -618,16 +711,25 @@ func (s *Server) editAt(w http.ResponseWriter, r *http.Request, file int, hash s
 	ctx, cancel := context.WithTimeout(r.Context(), time.Minute)
 	defer cancel()
 	var apiErr *apiError
-	res, err := c.N.Do(review.Author, file, hash, kind, decision, func(src []byte, gen *review.Gen) (patch.Edit, error) {
+	res, err := c.N.DoWith(review.Author, file, hash, kind, decision, func(src []byte, gen *review.Gen, h *navette.History) (patch.Edit, error) {
 		m, err := c.R.Map(ctx, file, store.Doc{Bytes: src, Hash: store.Hash(src)})
 		if err != nil {
 			apiErr = &apiError{status: http.StatusUnprocessableEntity, code: "render", message: err.Error()}
 			return patch.Edit{}, apiErr
 		}
-		e, ae := compute(src, m, gen)
+		e, ae := compute(src, m, gen, h)
 		if ae != nil {
 			apiErr = ae
 			return patch.Edit{}, ae
+		}
+		// The agent that must answer what this edit creates (D-49).
+		if to := recipientOf(r); to != "" {
+			addressed, err := review.Address(src, e, to)
+			if err != nil {
+				apiErr = &apiError{status: http.StatusUnprocessableEntity, code: "recipient", message: err.Error()}
+				return patch.Edit{}, apiErr
+			}
+			e = addressed
 		}
 		return e, nil
 	})
@@ -790,18 +892,19 @@ func (s *Server) blockText(w http.ResponseWriter, r *http.Request) {
 }
 
 type editRequest struct {
-	File  int    `json:"file"`
-	Hash  string `json:"hash"`
-	Mode  string `json:"mode"`  // block (default), passage, or lines (a structure, whole lines)
-	At    int    `json:"at"`    // block: a word of the block (it may start with an absorbed attribute); lines: the first word
-	To    int    `json:"to"`    // lines, insert: the end of the last word
-	Where string `json:"where"` // insert: before or after the element
-	Tight bool   `json:"tight"` // insert: one line ending (a list item), not a blank line
-	Start int    `json:"start"`
-	End   int    `json:"end"`
-	Text  string `json:"text"`
-	Note  string `json:"note"`  // optional message attached to the proposal
-	Whole bool   `json:"whole"` // one proposal for the whole rewriting (D-32)
+	Recipient string `json:"recipient"` // see commentRequest
+	File      int    `json:"file"`
+	Hash      string `json:"hash"`
+	Mode      string `json:"mode"`  // block (default), passage, or lines (a structure, whole lines)
+	At        int    `json:"at"`    // block: a word of the block (it may start with an absorbed attribute); lines: the first word
+	To        int    `json:"to"`    // lines, insert: the end of the last word
+	Where     string `json:"where"` // insert: before or after the element
+	Tight     bool   `json:"tight"` // insert: one line ending (a list item), not a blank line
+	Start     int    `json:"start"`
+	End       int    `json:"end"`
+	Text      string `json:"text"`
+	Note      string `json:"note"`  // optional message attached to the proposal
+	Whole     bool   `json:"whole"` // one proposal for the whole rewriting (D-32)
 }
 
 // editBlock records the rewriting of a block as proposals.
@@ -813,6 +916,10 @@ func (s *Server) editBlock(w http.ResponseWriter, r *http.Request) {
 	note := strings.TrimSpace(req.Note)
 	if len(req.Text) > 1<<20 || !utf8.ValidString(req.Text) || len(note) > maxNote || !utf8.ValidString(note) {
 		jsonError(w, http.StatusBadRequest, "text", "texte trop long ou mal encodé")
+		return
+	}
+	r, ok := withRecipient(w, r, req.Recipient)
+	if !ok {
 		return
 	}
 	var main critic.Span
@@ -1157,11 +1264,53 @@ func (s *Server) applyFix(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-type replyRequest struct {
+type amendRequest struct {
 	File  int    `json:"file"`
 	Hash  string `json:"hash"`
-	Start int    `json:"start"` // start of the annotation
+	Start int    `json:"start"` // start of the message
 	Text  string `json:"text"`
+}
+
+// amend rewrites one of the author's own messages (a comment, the remark of
+// a highlighted passage, a reply) not handed over to the agent yet (P9.1):
+// the message keeps its place, its identity and its thread; the journal keeps
+// its previous version. A message already handed over is answered instead.
+func (s *Server) amend(w http.ResponseWriter, r *http.Request) {
+	var req amendRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	// Not trimmed: undoing a change gives back the message exactly as it was,
+	// spaces included (« {>> remarque <<} »).
+	text := req.Text
+	if strings.TrimSpace(text) == "" || len(text) > maxNote || !utf8.ValidString(text) {
+		jsonError(w, http.StatusBadRequest, "text", "message vide, trop long ou mal encodé")
+		return
+	}
+	at := critic.Span{Start: req.Start, End: req.Start}
+	s.editWith(w, r, req.File, req.Hash, &at, "amend", "", func(src []byte, _ *sourcemap.Map, gen *review.Gen, h *navette.History) (patch.Edit, *apiError) {
+		e, m, err := review.Amend(src, req.Start, text, review.Author, gen)
+		switch {
+		case errors.Is(err, review.ErrNotFound):
+			return patch.Edit{}, &apiError{status: http.StatusNotFound, code: "not-found", message: "message introuvable"}
+		case errors.Is(err, patch.ErrUnchanged):
+			return patch.Edit{}, &apiError{status: http.StatusUnprocessableEntity, code: "same", message: "le message est inchangé"}
+		case err != nil:
+			return patch.Edit{}, &apiError{status: http.StatusUnprocessableEntity, code: "refused", message: message(err)}
+		case m.ID != "" && h.HandedOver()[m.ID]:
+			return patch.Edit{}, &apiError{status: http.StatusUnprocessableEntity, code: "handed",
+				message: "ce message a déjà été remis à l'agent : il ne se modifie plus, répondez dans le fil"}
+		}
+		return e, nil
+	})
+}
+
+type replyRequest struct {
+	Recipient string `json:"recipient"` // see commentRequest
+	File      int    `json:"file"`
+	Hash      string `json:"hash"`
+	Start     int    `json:"start"` // start of the annotation
+	Text      string `json:"text"`
 }
 
 // reply adds a comment at the end of the thread of an annotation, whoever
@@ -1174,6 +1323,10 @@ func (s *Server) reply(w http.ResponseWriter, r *http.Request) {
 	text := strings.TrimSpace(req.Text)
 	if text == "" || len(text) > maxNote || !utf8.ValidString(text) {
 		jsonError(w, http.StatusBadRequest, "text", "réponse vide, trop longue ou mal encodée")
+		return
+	}
+	r, ok := withRecipient(w, r, req.Recipient)
+	if !ok {
 		return
 	}
 	var at critic.Span
@@ -1234,4 +1387,25 @@ func (s *Server) passageText(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"start": res.Start, "end": res.End, "widened": res.Widened,
 		"text": string(d.Bytes[res.Start:res.End])})
+}
+
+// recipientKey carries the recipient of a request (P10.6) to editWith.
+type recipientKey struct{}
+
+// withRecipient checks the short name of the agent that must answer and
+// attaches it to the request; it writes 400 if it is invalid.
+func withRecipient(w http.ResponseWriter, r *http.Request, name string) (*http.Request, bool) {
+	if name == "" {
+		return r, true
+	}
+	if !review.ValidName(name) {
+		jsonError(w, http.StatusBadRequest, "recipient", "destinataire invalide : un nom court de glose set")
+		return r, false
+	}
+	return r.WithContext(context.WithValue(r.Context(), recipientKey{}, name)), true
+}
+
+func recipientOf(r *http.Request) string {
+	s, _ := r.Context().Value(recipientKey{}).(string)
+	return s
 }

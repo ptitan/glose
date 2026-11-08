@@ -6,7 +6,7 @@
 ./scripts/test-browser.sh
 ```
 
-La commande reconstruit Glose puis exécute neuf scénarios avec **le vrai serveur, pandoc et un vrai Chrome/Chromium sans interface**. Elle ne dépend ni des outils d'un agent IA ni d'un paquet npm. Aucune installation ni aucun téléchargement automatique.
+La commande reconstruit Glose puis exécute onze scénarios avec **le vrai serveur, pandoc et un vrai Chrome/Chromium sans interface**. Elle ne dépend ni des outils d'un agent IA ni d'un paquet npm. Aucune installation ni aucun téléchargement automatique.
 
 Prérequis de développement, non requis pour utiliser Glose :
 - Go et pandoc, comme pour les autres tests ;
@@ -33,6 +33,8 @@ Les prérequis absents font échouer la commande avec un conseil ; ils ne font p
 6. **Brouillons** : une réécriture vide et son message survivent à un vrai rechargement, puis à un redémarrage avec un nouveau port et un nouvel ordre des fichiers ; la récupération ne dépend pas du stockage de l'ancienne origine.
 7. **Réponse perdue** : l'opération est réellement écrite, puis sa réponse est perdue ; une seconde tentative n'écrit pas une seconde annotation et le brouillon reste à vérifier.
 8. **Fichiers** : arborescence, partie affichée, annotation d'un fichier non affiché, largeur de colonne et clic sans redimensionnement.
+10. **Modifier ses messages (P9.1)** : commentaire et réponse modifiés depuis la carte, panneau prérempli, octets attendus (identités comprises), annuler et rétablir, retrait d'une réponse, versions précédentes au journal ; après remise puis reprise, plus de « Modifier ».
+11. **Barre du haut (P9.2)** : état du rendu au pied de page, colonne repliée et retenue après rechargement, rail vers un onglet, Alt+0, barre collante au défilement ; recherche dont la saisie reste dans le champ, flèches, Échap, Entrée et ouverture du passage.
 9. **Consultation (P7)** : titres homonymes et ancres uniques, progression antérieure conservée, lien vers un chapitre caché avec espace dans son nom, défilement vers son titre, fragment vers une partie cachée, image relative réellement chargée, recherche globale insensible à la casse, passage ouvert/surligné, discussion résolue puis relue dans la frise (texte contenant du HTML rendu littéralement). Sources comparées avant/après.
 
 Le fichier est comparé en octets aux moments utiles ; `glose check` valide chaque projet à la fin. Les exceptions JavaScript non interceptées et les boîtes système inattendues font échouer le scénario.

@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="fr" data-theme="system">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agents — Glose</title>
+<link rel="stylesheet" href="/static/style.css">
+<script src="/static/icones.js" defer></script>
+<script src="/static/reglages-agents.js" defer></script>
+</head>
+<body class="page-agents">
+<main class="ra">
+  <header class="ra-tete">
+    <span class="sceau" aria-hidden="true">g</span>
+    <div>
+      <h1>Agents</h1>
+      <p>Réglages généraux de Glose, valables pour tous vos projets.</p>
+    </div>
+  </header>
+  <p id="ra-erreur" class="ra-erreur" role="alert" hidden></p>
+
+  <section class="ra-bloc" aria-labelledby="ra-t-detectes">
+    <div class="ra-bloc-tete">
+      <h2 id="ra-t-detectes">Agents installés</h2>
+      <button type="button" id="ra-detecter"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" data-icone="rafraichir"></svg> Actualiser</button>
+    </div>
+    <ul id="ra-detectes" class="ra-detectes"></ul>
+    <p class="aide">Glose cherche <code>claude</code>, <code>codex</code> et <code>opencode</code> dans le PATH. Il ne demande aucune clé : chaque agent garde sa propre connexion et ses outils (MCP, skills).</p>
+  </section>
+
+  <section class="ra-bloc" aria-labelledby="ra-t-alias">
+    <div class="ra-bloc-tete">
+      <h2 id="ra-t-alias">Noms courts</h2>
+      <button type="button" id="ra-ajouter"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" data-icone="plus"></svg> Ajouter</button>
+    </div>
+    <p class="aide">Un nom court désigne un agent et un modèle (par exemple « Sol » : Codex avec un modèle choisi). Celui par défaut répond aux annotations sans destinataire. Sans modèle, l'agent prend le sien.</p>
+    <div id="ra-alias" class="ra-alias"></div>
+  </section>
+
+  <section id="ra-projet" class="ra-bloc" aria-labelledby="ra-t-projet" hidden>
+    <h2 id="ra-t-projet">Ce texte</h2>
+    <p id="ra-projet-texte"></p>
+    <div class="ra-actions-texte">
+      <button type="button" id="ra-verifier"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" data-icone="resoudre"></svg> Vérifier les outils requis</button>
+    </div>
+    <ul id="ra-outils" class="ra-outils" hidden></ul>
+    <p class="aide">Un texte peut choisir son nom court, donner des consignes et demander des outils, dans son <code>glose.json</code> (clé <code>agent</code>) : voir <code>glose help profile</code>.</p>
+  </section>
+
+  <section id="ra-essai" class="ra-bloc" aria-labelledby="ra-t-essai" hidden>
+    <div class="ra-bloc-tete">
+      <h2 id="ra-t-essai">Essai</h2>
+      <span id="ra-essai-etat" class="ra-essai-etat" role="status" aria-live="polite"></span>
+    </div>
+    <pre id="ra-essai-sortie" class="ra-sortie" tabindex="0"></pre>
+    <p class="aide">Un essai lance l'agent pour de bon (il consomme des jetons) : il liste ses outils et lit <code>glose status</code>, sans rien écrire. Deux minutes au plus.</p>
+  </section>
+
+  <footer class="ra-pied">
+    <span id="ra-statut" role="status" aria-live="polite"></span>
+    <button type="button" id="ra-enregistrer" class="principal">Enregistrer</button>
+  </footer>
+</main>
+</body>
+</html>

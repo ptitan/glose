@@ -71,23 +71,43 @@ func stateLine(st navette.State) string {
 
 func cmdStatus(args []string, stdout, stderr io.Writer) int {
 	var asJSON bool
-	path, ok := parse("status", args, stderr, func(fs *flag.FlagSet) { fs.BoolVar(&asJSON, "json", false, "") })
+	var agent string
+	path, ok := parse("status", args, stderr, func(fs *flag.FlagSet) {
+		fs.BoolVar(&asJSON, "json", false, "")
+		fs.StringVar(&agent, "agent", "", "")
+	})
 	if !ok {
 		return ExitUsage
+	}
+	agentName, explicit, err := agentIdentity(agent)
+	if err != nil {
+		return usageError(stderr, "status : "+err.Error())
 	}
 	p, err := project.Load(path)
 	if err != nil {
 		return failure(stderr, err)
+	}
+	if explicit {
+		touchAgent(p, agentName, navette.ActRead)
 	}
 	st, _, _, err := navette.New(p).State()
 	if err != nil {
 		return failure(stderr, err)
 	}
 	srv, srvErr := server.Running(p.State())
+	// The address with its token is the author's key to decide: never shown
+	// to an agent (D-14), who runs status under its name (P10.1).
+	url := ""
+	if srvErr == nil {
+		url = srv.URL
+		if explicit {
+			url = srv.Base()
+		}
+	}
 	if asJSON {
-		out := map[string]any{"project": p.Root, "state": st, "server": nil}
+		out := map[string]any{"project": p.Root, "state": st, "server": nil, "agentsConfigured": agentsConfigured()}
 		if srvErr == nil {
-			out["server"] = map[string]any{"url": srv.URL, "pid": srv.PID}
+			out["server"] = map[string]any{"url": url, "pid": srv.PID}
 		}
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
@@ -96,7 +116,7 @@ func cmdStatus(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintln(stdout, stateLine(st))
 	if srvErr == nil {
-		fmt.Fprintf(stdout, "Serveur : en marche, %s (processus %d)\n", srv.URL, srv.PID)
+		fmt.Fprintf(stdout, "Serveur : en marche, %s (processus %d)\n", url, srv.PID)
 	} else {
 		fmt.Fprintln(stdout, "Serveur : arrêté (glose open pour le lancer)")
 	}
@@ -115,6 +135,16 @@ func cmdStatus(args []string, stdout, stderr io.Writer) int {
 	for _, pb := range st.Problems {
 		fmt.Fprintf(stdout, "Attention : %s\n", pb)
 	}
+	if a := st.Agent; a != nil {
+		fresh := "aucun signe depuis " + when(a.Seen)
+		if a.Fresh {
+			fresh = "dernier signe le " + when(a.Seen)
+		}
+		fmt.Fprintf(stdout, "Agent : %s (%s)\n", a.Name, fresh)
+	}
+	if !agentsConfigured() {
+		fmt.Fprintln(stdout, noAgentLine)
+	}
 	return ExitOK
 }
 
@@ -122,11 +152,12 @@ var kindNames = map[string]string{"comment": "commentaire(s)", "highlight": "pas
 	"deletion": "suppression(s)", "substitution": "remplacement(s)"}
 
 func cmdDone(args []string, stdout, stderr io.Writer) int {
-	var note string
+	var note, agent string
 	var asJSON bool
 	path, ok := parse("done", args, stderr, func(fs *flag.FlagSet) {
 		fs.StringVar(&note, "note", "", "")
 		fs.BoolVar(&asJSON, "json", false, "")
+		fs.StringVar(&agent, "agent", "", "")
 	})
 	if !ok {
 		return ExitUsage
@@ -134,11 +165,44 @@ func cmdDone(args []string, stdout, stderr io.Writer) int {
 	if err := fromStdin(map[string]*string{"note": &note}); err != nil {
 		return usageError(stderr, "done : "+err.Error())
 	}
+	agentName, _, err := agentIdentity(agent)
+	if err != nil {
+		return usageError(stderr, "done : "+err.Error())
+	}
 	p, err := project.Load(path)
 	if err != nil {
 		return failure(stderr, err)
 	}
+	// A turn with several recipients (P10.6): done closes the pass of this
+	// agent, and Glose hands the turn back after the last one.
+	if h, herr := navette.New(p).History(); herr == nil && h.Hand() == review.Agent {
+		pass := os.Getenv(navette.PassEnv)
+		switch err := navette.ClosePass(p.State(), h.Turn(), pass, agentName, strings.TrimSpace(note)); {
+		case err == nil:
+			touchAgent(p, agentName, navette.ActDone)
+			if asJSON {
+				json.NewEncoder(stdout).Encode(map[string]any{"pass": true, "round": navette.Round(h.Turn())})
+			} else {
+				fmt.Fprintln(stdout, "Votre passage est clos. Glose remettra la main à l'auteur après les autres agents de ce tour ; arrêtez-vous ici.")
+			}
+			return ExitOK
+		case !errors.Is(err, navette.ErrNoPass):
+			return failure(stderr, err)
+		case pass != "":
+			return failure(stderr, fmt.Errorf("aucun passage %s en cours pour ce tour : la main n'est pas remise ; arrêtez-vous ici", pass))
+		}
+		// A bound session whose part is closed never hands over the whole
+		// turn while the other agents work (Codex).
+		if ps := navette.ReadPasses(p.State()); ps != nil && ps.Turn == h.Turn() && ps.Linked == agentName && ps.LinkedDone {
+			return failure(stderr, errors.New("votre part de ce tour est déjà close : Glose remettra la main après les autres agents ; attendez le tour suivant"))
+		}
+	}
 	ho, err := navette.New(p).Handoff(review.Agent, strings.TrimSpace(note))
+	if err == nil {
+		touchAgent(p, agentName, navette.ActDone)
+	} else {
+		touchAgent(p, agentName, navette.ActRead)
+	}
 	var te *navette.TrackError
 	if errors.As(err, &te) {
 		fmt.Fprintln(stderr, "glose : votre tour n'est pas remis. "+te.Error())
@@ -166,11 +230,12 @@ func cmdDone(args []string, stdout, stderr io.Writer) int {
 }
 
 func cmdWait(args []string, stdout, stderr io.Writer) int {
-	var role string
+	var role, agent string
 	var after int64
 	var timeout time.Duration
 	var asJSON bool
 	path, ok := parse("wait", args, stderr, func(fs *flag.FlagSet) {
+		fs.StringVar(&agent, "agent", "", "")
 		fs.StringVar(&role, "role", review.Agent, "")
 		fs.Int64Var(&after, "after", 0, "")
 		fs.DurationVar(&timeout, "timeout", 0, "")
@@ -182,6 +247,10 @@ func cmdWait(args []string, stdout, stderr io.Writer) int {
 	if role != review.Agent && role != review.Author {
 		return usageError(stderr, "wait : --role vaut agent ou author")
 	}
+	agentName, _, err := agentIdentity(agent)
+	if err != nil {
+		return usageError(stderr, "wait : "+err.Error())
+	}
 	p, err := project.Load(path)
 	if err != nil {
 		return failure(stderr, err)
@@ -191,6 +260,9 @@ func cmdWait(args []string, stdout, stderr io.Writer) int {
 	if timeout > 0 {
 		deadline = time.Now().Add(timeout)
 	}
+	// The agent who waits renews his sign of life (P10.1), at most every
+	// WaitBeat: not at each reading of the journal.
+	var beat time.Time
 	for {
 		h, err := n.History()
 		if err != nil {
@@ -200,18 +272,41 @@ func cmdWait(args []string, stdout, stderr io.Writer) int {
 		if l := h.Last(); l != nil {
 			lastSeq = l.Seq
 		}
-		if h.Hand() == role && lastSeq >= after && (after == 0 || lastSeq > after) {
+		ready := h.Hand() == role && lastSeq >= after && (after == 0 || lastSeq > after)
+		if role == review.Agent {
+			if ready {
+				navette.Touch(p.State(), agentName, navette.ActRead, h.Turn())
+			} else if time.Since(beat) >= navette.WaitBeat {
+				navette.Touch(p.State(), agentName, navette.ActWait, h.Turn())
+				beat = time.Now()
+			}
+		}
+		if ready {
 			st, _, _, err := n.State()
 			if err != nil {
 				return failure(stderr, err)
 			}
+			// A turn with several recipients (P10.6): this session answers
+			// only what the agents launched by Glose do not take.
+			var shared string
+			if ps := navette.ReadPasses(p.State()); role == review.Agent && ps != nil && ps.Turn == h.Turn() && ps.Linked == agentName {
+				shared = fmt.Sprintf("Ce tour a plusieurs destinataires : d'autres agents répondent aux annotations qui leur sont adressées. "+
+					"Ne traitez que les vôtres : glose list --json --mine --agent %q ; glose done clôt votre part, Glose rendra la main.", agentName)
+			}
 			if asJSON {
 				enc := json.NewEncoder(stdout)
 				enc.SetIndent("", "  ")
-				enc.Encode(map[string]any{"seq": lastSeq, "state": st})
+				out := map[string]any{"seq": lastSeq, "state": st}
+				if shared != "" {
+					out["shared"] = shared
+				}
+				enc.Encode(out)
 			} else {
 				fmt.Fprintln(stdout, stateLine(st))
 				fmt.Fprintf(stdout, "Curseur : %d (glose wait --after %d attend la remise suivante)\n", lastSeq, lastSeq)
+				if shared != "" {
+					fmt.Fprintln(stdout, shared)
+				}
 			}
 			return ExitOK
 		}
@@ -307,7 +402,11 @@ func cmdLog(args []string, stdout, stderr io.Writer) int {
 				if c.Kind == "substitution" {
 					what += " → « " + oneLine(c.New, 60) + " »"
 				}
-				fmt.Fprintf(stdout, "      %s corrigée, version précédente (%s) : %s\n", c.ID, names[c.Kind], what)
+				done := "corrigée"
+				if c.Kind == "message" {
+					done = "modifié"
+				}
+				fmt.Fprintf(stdout, "      %s %s, version précédente (%s) : %s\n", c.ID, done, names[c.Kind], what)
 			}
 		}
 	}
@@ -323,10 +422,10 @@ var partNames = map[string]string{"author": "annotations de l'auteur", "agent": 
 
 var opNames = map[string]string{"comment": "commentaire", "reply": "réponse", "propose": "proposition", "decide": "décision",
 	"resolve": "fil résolu", "withdraw": "retrait", "identify": "identifiants ajoutés", "track": "modifications converties en propositions",
-	"revise": "proposition corrigée", "undo": "décision annulée"}
+	"revise": "proposition corrigée", "amend": "message modifié", "undo": "décision annulée"}
 
 var names = map[string]string{"comment": "commentaire", "highlight": "passage commenté", "addition": "ajout",
-	"deletion": "suppression", "substitution": "remplacement"}
+	"deletion": "suppression", "substitution": "remplacement", "message": "message"}
 
 // ---------- Commands of the agent (P2.6 bis) ----------
 
@@ -335,6 +434,7 @@ type agentTarget struct {
 	file, find, after string
 	id                string
 	text, new, note   string
+	agent             string
 	asJSON, whole     bool
 }
 
@@ -348,6 +448,7 @@ func (t *agentTarget) flags(fs *flag.FlagSet) {
 	fs.StringVar(&t.note, "note", "", "")
 	fs.BoolVar(&t.asJSON, "json", false, "")
 	fs.BoolVar(&t.whole, "whole", false, "")
+	fs.StringVar(&t.agent, "agent", "", "")
 }
 
 // fileIndex returns the index of a file of the project.
@@ -411,10 +512,15 @@ func agentWrite(args []string, name, kind string, stdout, stderr io.Writer,
 	if msg := check(&t); msg != "" {
 		return usageError(stderr, name+" : "+msg)
 	}
+	agentName, _, err := agentIdentity(t.agent)
+	if err != nil {
+		return usageError(stderr, name+" : "+err.Error())
+	}
 	p, err := project.Load(path)
 	if err != nil {
 		return failure(stderr, err)
 	}
+	touchAgent(p, agentName, navette.ActWrite)
 	n := navette.New(p)
 	file := -1
 	if t.file != "" {
@@ -436,8 +542,15 @@ func agentWrite(args []string, name, kind string, stdout, stderr io.Writer,
 		}
 	}
 	before, _ := os.ReadFile(p.Path(file))
+	via, model := viaName(agentName), agentModel(p, agentName)
 	res, err := n.Do(review.Agent, file, "", kind, "", func(src []byte, gen *review.Gen) (patch.Edit, error) {
-		return compute(&t, src, gen)
+		e, err := compute(&t, src, gen)
+		if err != nil || (via == "" && model == "") {
+			return e, err
+		}
+		// The agent that wrote it, and its model when known, on each
+		// message and proposal (D-49, P10.11).
+		return review.SignModel(src, e, via, model)
 	})
 	if err != nil {
 		return failure(stderr, agentMessage(err))

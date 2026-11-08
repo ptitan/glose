@@ -50,7 +50,23 @@ type Meta struct {
 	// answers: its text is what the proposal should propose instead. The
 	// author may apply it (it does not apply itself, D-14).
 	Fix bool
+	// To is the short name of the agent that must answer an annotation of
+	// the author (D-49); Via the short name of the agent that wrote a
+	// message or a proposal of the agent. Unknown to the versions before
+	// P10.6, which ignore them.
+	To, Via string
+	// Model is the model of the agent that wrote it (P10.11), when known.
+	Model string
 }
+
+// modelRe is the form of the value of model= (as agents.CheckModel).
+var modelRe = regexp.MustCompile(`^[A-Za-z0-9._:/#@+-]{1,200}$`)
+
+// nameRe is the form of the values of to= and via= (short names, D-49).
+var nameRe = regexp.MustCompile(`^[A-Za-z0-9._-]{1,32}$`)
+
+// ValidName reports whether s may be the value of to= or via=.
+func ValidName(s string) bool { return nameRe.MatchString(s) }
 
 // Bytes returns the technical comment, delimiters included.
 func (m Meta) Bytes() []byte {
@@ -66,6 +82,15 @@ func (m Meta) Bytes() []byte {
 	}
 	if m.Fix {
 		b.WriteString(" fix=1")
+	}
+	if m.To != "" {
+		b.WriteString(" to=" + m.To)
+	}
+	if m.Via != "" {
+		b.WriteString(" via=" + m.Via)
+	}
+	if m.Model != "" {
+		b.WriteString(" model=" + m.Model)
 	}
 	b.WriteString(critic.Closer(critic.Comment))
 	return []byte(b.String())
@@ -109,6 +134,20 @@ func ParseMeta(text []byte) (Meta, error) {
 			m.By = v
 		case "fix":
 			m.Fix = v == "1"
+		case "model":
+			if !modelRe.MatchString(v) {
+				return Meta{}, fmt.Errorf("modèle invalide : %q", v)
+			}
+			m.Model = v
+		case "to", "via":
+			if !ValidName(v) {
+				return Meta{}, fmt.Errorf("nom court invalide : %q", v)
+			}
+			if k == "to" {
+				m.To = v
+			} else {
+				m.Via = v
+			}
 		default:
 			// Unknown keys are kept for later versions; they are ignored.
 		}
@@ -185,21 +224,25 @@ func (g *Gen) New() (string, error) {
 
 // Message is one message of a thread.
 type Message struct {
-	ID, By string
-	Fix    bool         // a correction of the proposal (Meta.Fix)
-	Mark   critic.Mark  // the comment
-	Meta   *critic.Span // its technical comment, if any
-	Span   critic.Span  // the comment and its technical comment
+	ID, By  string
+	To, Via string       // Meta.To, Meta.Via
+	Model   string       // Meta.Model
+	Fix     bool         // a correction of the proposal (Meta.Fix)
+	Mark    critic.Mark  // the comment
+	Meta    *critic.Span // its technical comment, if any
+	Span    critic.Span  // the comment and its technical comment
 }
 
 // Annotation is an annotation with its identity and its thread.
 type Annotation struct {
-	ID, By string
-	Kind   critic.Kind
-	Mark   critic.Mark  // the main mark
-	Span   critic.Span  // the whole annotation, thread included
-	Head   critic.Span  // the mark, and the remark of a highlighted passage
-	Meta   *critic.Span // the technical comment of the annotation, if any
+	ID, By  string
+	To, Via string // Meta.To, Meta.Via of the annotation
+	Model   string // Meta.Model of the annotation
+	Kind    critic.Kind
+	Mark    critic.Mark  // the main mark
+	Span    critic.Span  // the whole annotation, thread included
+	Head    critic.Span  // the mark, and the remark of a highlighted passage
+	Meta    *critic.Span // the technical comment of the annotation, if any
 	// Messages is the thread: for a comment, the comment itself first; for a
 	// highlighted passage, its remark first (both carry the identity of the
 	// annotation); then the replies.
@@ -281,7 +324,7 @@ func Read(src []byte) *Doc {
 			s := marks[elems[i]].Span
 			a.Meta = &s
 			if m, ok := meta(elems[i]); ok {
-				a.ID, a.By = m.ID, m.By
+				a.ID, a.By, a.To, a.Via, a.Model = m.ID, m.By, m.To, m.Via, m.Model
 				if m.Re != "" {
 					d.Issues = append(d.Issues, Issue{s.Start, IssueMisplaced + " (identifiant de message en tête d'annotation)"})
 				}
@@ -290,7 +333,7 @@ func Read(src []byte) *Doc {
 			i++
 		}
 		for k := range a.Messages { // the head messages share the identity of the annotation
-			a.Messages[k].ID, a.Messages[k].By = a.ID, a.By
+			a.Messages[k].ID, a.Messages[k].By, a.Messages[k].To, a.Messages[k].Via, a.Messages[k].Model = a.ID, a.By, a.To, a.Via, a.Model
 			if a.Meta != nil {
 				a.Messages[k].Span.End = a.Meta.End
 			}
@@ -307,7 +350,7 @@ func Read(src []byte) *Doc {
 				msg.Meta = &s
 				msg.Span.End = s.End
 				if m, ok := meta(elems[i+1]); ok {
-					msg.ID, msg.By, msg.Fix = m.ID, m.By, m.Fix
+					msg.ID, msg.By, msg.Fix, msg.To, msg.Via, msg.Model = m.ID, m.By, m.Fix, m.To, m.Via, m.Model
 					use(m.ID, s.Start)
 					if m.Re != "" && a.ID != "" && m.Re != a.ID {
 						d.Issues = append(d.Issues, Issue{s.Start, IssueMoved + " : " + m.ID})
@@ -762,7 +805,7 @@ func Fix(src []byte, id, text, by string, gen *Gen) (patch.Edit, int, error) {
 			if m.Span.Start != at || m.Meta == nil {
 				continue
 			}
-			meta := Meta{ID: m.ID, Re: ann.ID, By: by, Fix: true}.Bytes()
+			meta := Meta{ID: m.ID, Re: ann.ID, By: by, Fix: true, To: m.To, Via: m.Via, Model: m.Model}.Bytes()
 			fixed := patch.Edit{Start: m.Meta.Start, End: m.Meta.End, Insert: meta}.Apply(out)
 			if err := SameButMeta(out, fixed); err != nil {
 				return patch.Edit{}, 0, err
@@ -786,6 +829,55 @@ func FixText(msg []byte) string {
 		return ""
 	}
 	return string(msg)
+}
+
+// Errors of Amend.
+var (
+	ErrAmendNotYours = errors.New("seuls vos propres messages se modifient ; répondez plutôt dans le fil")
+	ErrAmendFix      = errors.New("une correction proposée par l'agent ne se modifie pas : reprenez-la dans votre proposition, ou répondez")
+	ErrAmendMeta     = errors.New("un message ne peut pas commencer par « glose: », réservé aux identifiants")
+)
+
+// Amend rewrites the message that starts at offset at, so that it says text
+// instead: the remark of a comment or of a highlighted passage, or a reply.
+// Only the messages of by (or those still without identity) can be amended,
+// and not a correction (Meta.Fix). The identity and the thread stay; a
+// message written by hand receives its identity now, attributed to by. It
+// returns the edit and the message as it was.
+//
+// Whether the message was already handed over to the other party is not
+// known here (package navette): the caller refuses those.
+func Amend(src []byte, at int, text, by string, gen *Gen) (patch.Edit, Message, error) {
+	if IsMeta([]byte(text)) {
+		return patch.Edit{}, Message{}, ErrAmendMeta
+	}
+	d := Read(src)
+	for _, a := range d.Annotations {
+		for _, m := range a.Messages {
+			if m.Mark.Span.Start != at {
+				continue
+			}
+			if m.Fix {
+				return patch.Edit{}, m, ErrAmendFix
+			}
+			if m.By != by && !(m.ID == "" && m.By == "") {
+				return patch.Edit{}, m, ErrAmendNotYours
+			}
+			idx := -1
+			for i, mk := range d.Marks {
+				if mk.Span == m.Mark.Span {
+					idx = i
+				}
+			}
+			e, err := patch.Amend(src, d.Marks, d.Group(a), idx, text)
+			if err != nil {
+				return patch.Edit{}, m, err
+			}
+			full, err := WithIDs(src, e, by, gen)
+			return full, m, err
+		}
+	}
+	return patch.Edit{}, Message{}, ErrNotFound
 }
 
 // ErrNotFound is returned when no annotation or message has the identifier
@@ -820,3 +912,125 @@ func (a Annotation) group(marks []critic.Mark) critic.Annotation {
 // Group returns the critic annotation (indices of marks) of a, for the
 // operations of package patch.
 func (d *Doc) Group(a Annotation) critic.Annotation { return a.group(d.Marks) }
+
+// Recipient is the agent that must answer the annotation (D-49): the To of
+// its last message of the author that has one, else its own; "" for the
+// default agent.
+func (a Annotation) Recipient() string {
+	to := a.To
+	for _, m := range a.Replies() {
+		if m.By == Author && m.To != "" {
+			to = m.To
+		}
+	}
+	return to
+}
+
+// setMeta rewrites the technical comments of the annotations and messages
+// of out whose identifier is in ids, by f. It returns out unchanged if
+// there is nothing to do.
+func setMeta(out []byte, ids map[string]bool, f func(*Meta)) ([]byte, error) {
+	if len(ids) == 0 {
+		return out, nil
+	}
+	d := Read(out)
+	type rw struct {
+		at   critic.Span
+		meta []byte
+	}
+	var todo []rw
+	visit := func(span *critic.Span) error {
+		m, err := ParseMeta(out[span.Start+3 : span.End-3])
+		if err != nil {
+			return err
+		}
+		f(&m)
+		todo = append(todo, rw{*span, m.Bytes()})
+		return nil
+	}
+	for _, a := range d.Annotations {
+		if a.Meta != nil && ids[a.ID] {
+			if err := visit(a.Meta); err != nil {
+				return nil, err
+			}
+		}
+		for _, m := range a.Replies() {
+			if m.Meta != nil && ids[m.ID] {
+				if err := visit(m.Meta); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+	res := out
+	for i := len(todo) - 1; i >= 0; i-- { // from the end: offsets stay valid
+		res = patch.Edit{Start: todo[i].at.Start, End: todo[i].at.End, Insert: todo[i].meta}.Apply(res)
+	}
+	if err := SameButMeta(out, res); err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+// created returns the identifiers that are in after and not in before.
+func created(before, after []byte) map[string]bool {
+	old := map[string]bool{}
+	for _, id := range Read(before).IDs() {
+		old[id] = true
+	}
+	out := map[string]bool{}
+	for _, id := range Read(after).IDs() {
+		if !old[id] {
+			out[id] = true
+		}
+	}
+	return out
+}
+
+// Address writes to=name on the annotations and messages that the edit e of
+// src creates (an annotation or a reply of the author addressed to an
+// agent, D-49). An empty name changes nothing.
+func Address(src []byte, e patch.Edit, name string) (patch.Edit, error) {
+	return stamp(src, e, name, func(m *Meta) { m.To = name })
+}
+
+// Sign writes via=name on the annotations and messages that the edit e of
+// src creates (the agent who wrote them, D-49).
+func Sign(src []byte, e patch.Edit, name string) (patch.Edit, error) {
+	return SignModel(src, e, name, "")
+}
+
+// SignModel is Sign, with model=model when the model is known (P10.11): the
+// model is written even without a name (the default agent « agent »).
+func SignModel(src []byte, e patch.Edit, name, model string) (patch.Edit, error) {
+	if model != "" && !modelRe.MatchString(model) {
+		model = ""
+	}
+	if name == "" && model == "" {
+		return e, nil
+	}
+	if name != "" && !ValidName(name) {
+		return patch.Edit{}, fmt.Errorf("nom court invalide : %q", name)
+	}
+	out := e.Apply(src)
+	res, err := setMeta(out, created(src, out), func(m *Meta) { m.Via, m.Model = name, model })
+	if err != nil {
+		return patch.Edit{}, err
+	}
+	return Diff(src, res), nil
+}
+
+func stamp(src []byte, e patch.Edit, name string, f func(*Meta)) (patch.Edit, error) {
+	if name == "" {
+		return e, nil
+	}
+	if !ValidName(name) {
+		return patch.Edit{}, fmt.Errorf("nom court invalide : %q", name)
+	}
+	out := e.Apply(src)
+	res, err := setMeta(out, created(src, out), f)
+	if err != nil {
+		return patch.Edit{}, err
+	}
+	return Diff(src, res), nil
+}

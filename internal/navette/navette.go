@@ -213,15 +213,28 @@ const (
 	StatusOpen = "open" // handed over, waiting for an answer or a decision
 )
 
-// Annotate fills the status and the turn of birth of the annotations.
+// HandedOver returns the identifiers (annotations and replies) that the last
+// handover gave to the other party: those are no longer « new ».
+func (h *History) HandedOver() map[string]bool {
+	out := map[string]bool{}
+	if l := h.Last(); l != nil {
+		for _, id := range l.TurnEv.IDs {
+			out[id] = true
+		}
+	}
+	return out
+}
+
+// Annotate fills the status and the turn of birth of the annotations, and the
+// status of each message of their threads.
 func Annotate(anns []render.Annotation, h *History) {
 	born := h.Born()
-	var last map[string]bool
-	if l := h.Last(); l != nil {
-		last = map[string]bool{}
-		for _, id := range l.TurnEv.IDs {
-			last[id] = true
+	handed := h.HandedOver()
+	status := func(id string) string {
+		if id != "" && handed[id] {
+			return StatusOpen
 		}
+		return StatusNew
 	}
 	for i := range anns {
 		a := &anns[i]
@@ -229,9 +242,9 @@ func Annotate(anns []render.Annotation, h *History) {
 		if t, ok := born[a.ID]; ok && a.ID != "" {
 			a.Turn = t
 		}
-		a.Status = StatusNew
-		if a.ID != "" && last[a.ID] {
-			a.Status = StatusOpen
+		a.Status = status(a.ID)
+		for k := range a.Messages {
+			a.Messages[k].Status = status(a.Messages[k].ID)
 		}
 	}
 }
@@ -267,8 +280,15 @@ type State struct {
 	Annotations int            `json:"annotations"`
 	Kinds       map[string]int `json:"kinds"`
 	Statuses    map[string]int `json:"statuses"`
-	Issues      int            `json:"issues"`
-	Problems    []string       `json:"problems"`
+	// ThisTurn counts what the party who has the hand wrote during this
+	// turn, not handed over yet: "comments", "proposals", "replies" (the
+	// handover button shows it, P9.3).
+	ThisTurn map[string]int `json:"thisTurn"`
+	Issues   int            `json:"issues"`
+	Problems []string       `json:"problems"`
+	// Agent is the presence of the agent (P10.1), or null if no agent ever
+	// gave a sign; not normative (.glose/agent.json).
+	Agent *AgentState `json:"agent"`
 }
 
 // Round gives the round of a turn as the author counts them: she annotates,
@@ -284,10 +304,11 @@ func (n *Navette) State() (State, *History, *Files, error) {
 		return State{}, nil, nil, err
 	}
 	f := n.ReadFiles()
-	st := State{Turn: h.Turn(), Round: Round(h.Turn()), Part: h.Hand(), Hand: h.Hand(), Kinds: map[string]int{}, Statuses: map[string]int{}, Problems: []string{}}
+	st := State{Turn: h.Turn(), Round: Round(h.Turn()), Part: h.Hand(), Hand: h.Hand(), Kinds: map[string]int{}, Statuses: map[string]int{}, ThisTurn: map[string]int{}, Problems: []string{}}
 	if l := h.Last(); l != nil {
 		st.Since, st.LastActor, st.Note, st.Reclaimed = l.Time, l.Actor, l.TurnEv.Note, l.TurnEv.Reclaimed
 	}
+	st.Agent = n.Agent(st.Hand, st.Since)
 	var all []render.Annotation
 	for i := range n.P.Files {
 		if f.Errs[i] != nil {
@@ -299,10 +320,27 @@ func (n *Navette) State() (State, *History, *Files, error) {
 	}
 	st.Issues += len(render.CrossDuplicates(all))
 	Annotate(all, h)
+	// Written by the hand (or by hand, without identity yet: it will be
+	// attributed to the hand at the handover, D-19).
+	mine := func(by string) bool { return by == st.Hand || by == "" }
 	for _, a := range all {
 		st.Annotations++
 		st.Kinds[a.Kind]++
 		st.Statuses[a.Status]++
+		// A footnote added or deleted is two linked proposals, one card.
+		linked := len(a.Partners) > 0 && !a.Primary
+		if a.Status == StatusNew && mine(a.By) && !linked {
+			if a.Kind == "comment" || a.Kind == "highlight" {
+				st.ThisTurn["comments"]++
+			} else {
+				st.ThisTurn["proposals"]++
+			}
+		}
+		for _, m := range a.Messages {
+			if m.Reply && !m.Fix && m.Status == StatusNew && mine(m.By) {
+				st.ThisTurn["replies"]++
+			}
+		}
 	}
 	for _, p := range h.Problems {
 		st.Problems = append(st.Problems, fmt.Sprintf("journal, ligne %d : %s", p.Line, p.Message))
@@ -438,12 +476,14 @@ func Compare(path string, before, after []byte, decision string) ([]string, []jo
 }
 
 // Revisions returns a copy of the proposals of before whose identity is still
-// in after, but whose mark has changed (a correction, P3.2): their previous
+// in after, but whose mark has changed (a correction, P3.2), and of the
+// messages whose text has changed (an amended message, P9.1): their previous
 // version, kept by the journal.
 func Revisions(path string, before, after []byte) []journal.Closed {
 	b, a := review.Read(before), review.Read(after)
 	var out []journal.Closed
 	for _, old := range b.Annotations {
+		out = append(out, amendedMessages(path, b, old, a)...)
 		if !isProposal(old.Kind) {
 			continue
 		}
@@ -460,6 +500,45 @@ func Revisions(path string, before, after []byte) []journal.Closed {
 		c := copyOf(path, before, old, Revise)
 		c.ID = now.ID // a proposal written by hand receives its identity with the correction
 		out = append(out, c)
+	}
+	return out
+}
+
+// amendedMessages returns a copy of the messages of the annotation old (in
+// the text b) that keep their identity in a but whose text has changed (an
+// amended message, P9.1): their previous version, kept by the journal. The
+// head of a comment or of a highlighted passage shares the identity of the
+// annotation; replies have their own. Messages without identity are not
+// followed: they receive one when they are amended, and appear then.
+func amendedMessages(path string, b *review.Doc, old review.Annotation, a *review.Doc) []journal.Closed {
+	if old.ID == "" {
+		return nil
+	}
+	now, ok := a.Find(old.ID)
+	if !ok {
+		return nil
+	}
+	text := func(d *review.Doc, m review.Message) string { return string(d.Src[m.Mark.Text.Start:m.Mark.Text.End]) }
+	var out []journal.Closed
+	add := func(m review.Message, was string) {
+		out = append(out, journal.Closed{ID: m.ID, File: path, Decision: Revise, Kind: "message", By: m.By, Text: was})
+	}
+	oh, nh := len(old.Messages)-len(old.Replies()), len(now.Messages)-len(now.Replies())
+	for k := 0; k < oh && k < nh; k++ {
+		if was := text(b, old.Messages[k]); was != text(a, now.Messages[k]) {
+			add(old.Messages[k], was)
+		}
+	}
+	replies := map[string]review.Message{}
+	for _, m := range now.Replies() {
+		if m.ID != "" {
+			replies[m.ID] = m
+		}
+	}
+	for _, m := range old.Replies() {
+		if n, ok := replies[m.ID]; ok && m.ID != "" && text(b, m) != text(a, n) {
+			add(m, text(b, m))
+		}
 	}
 	return out
 }

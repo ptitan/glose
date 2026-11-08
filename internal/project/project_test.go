@@ -313,3 +313,29 @@ func TestSingleRoot(t *testing.T) {
 		t.Fatalf("fichier seul : %+v, %v", p, err)
 	}
 }
+
+// P10.3: the key « agent » of the profile.
+func TestAgentProfile(t *testing.T) {
+	for _, c := range []struct {
+		json string
+		ok   bool
+	}{
+		{`{"agent":{"alias":"Sol","instructions":"Vérifie chaque référence avec LexHarness.","requires":["mcp:lexharness","skill:juriste-fr"]}}`, true},
+		{`{"agent":{}}`, true},
+		{`{"agent":{"alias":"Sol Levant"}}`, false},
+		{`{"agent":{"requires":["lexharness"]}}`, false},
+		{`{"agent":{"requires":["mcp:/usr/bin/x"]}}`, false},
+		{`{"agent":{"key":"secret"}}`, false},
+	} {
+		dir := t.TempDir()
+		os.WriteFile(filepath.Join(dir, "a.md"), []byte("Texte.\n"), 0o644)
+		os.WriteFile(filepath.Join(dir, ProfileName), []byte(c.json), 0o644)
+		p, err := Load(dir)
+		if (err == nil) != c.ok {
+			t.Errorf("%s : %v", c.json, err)
+		}
+		if err == nil && c.ok && strings.Contains(c.json, "Sol") && (p.Agent.Alias != "Sol" || len(p.Agent.Requires) != 2) {
+			t.Errorf("%+v", p.Agent)
+		}
+	}
+}

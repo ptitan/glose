@@ -364,3 +364,196 @@ func TestNoteDefinitionInAContainerFollowsItsLastReference(t *testing.T) {
 		}
 	}
 }
+
+// P9.1 : l'auteur réécrit ses propres messages (commentaire, remarque d'un
+// passage, réponse) ; l'identité et le fil restent.
+func TestAmend(t *testing.T) {
+	const (
+		cmt = "a {>>vieux<<}{>>glose:v1 id=abcdef by=author<<} b"
+		hl  = "a {==p==}{>>vieux<<}{>>glose:v1 id=abcdef by=author<<}{>>r<<}{>>glose:v1 id=ghijkm re=abcdef by=agent<<} b"
+		rep = "a {~~x~>y~~}{>>glose:v1 id=abcdef by=agent<<}{>>vieux<<}{>>glose:v1 id=ghijkm re=abcdef by=author<<} b"
+	)
+	cases := []struct {
+		src, at, want string
+	}{
+		{cmt, "{>>vieux", "a {>>neuf<<}{>>glose:v1 id=abcdef by=author<<} b"},
+		{hl, "{>>vieux", "a {==p==}{>>neuf<<}{>>glose:v1 id=abcdef by=author<<}{>>r<<}{>>glose:v1 id=ghijkm re=abcdef by=agent<<} b"},
+		{rep, "{>>vieux", "a {~~x~>y~~}{>>glose:v1 id=abcdef by=agent<<}{>>neuf<<}{>>glose:v1 id=ghijkm re=abcdef by=author<<} b"},
+	}
+	for _, c := range cases {
+		src := []byte(c.src)
+		e, m, err := Amend(src, bytes.Index(src, []byte(c.at)), "neuf", Author, NewGen(nil))
+		if err != nil {
+			t.Fatalf("Amend(%q) : %v", c.src, err)
+		}
+		if out := e.Apply(src); string(out) != c.want {
+			t.Errorf("Amend(%q) = %q, attendu %q", c.src, out, c.want)
+		}
+		if m.ID == "" || m.By != Author {
+			t.Errorf("message rendu : %+v", m)
+		}
+	}
+}
+
+func TestAmendRefusals(t *testing.T) {
+	agent := []byte("a {==p==}{>>r<<}{>>glose:v1 id=abcdef by=agent<<} b")
+	if _, _, err := Amend(agent, bytes.Index(agent, []byte("{>>r")), "x", Author, NewGen(nil)); !errors.Is(err, ErrAmendNotYours) {
+		t.Errorf("message de l'agent : %v", err)
+	}
+	fix := []byte("a {~~x~>y~~}{>>glose:v1 id=abcdef by=author<<}{>>z<<}{>>glose:v1 id=ghijkm re=abcdef by=agent fix=1<<} b")
+	if _, _, err := Amend(fix, bytes.Index(fix, []byte("{>>z")), "w", Agent, NewGen(nil)); !errors.Is(err, ErrAmendFix) {
+		t.Errorf("correction de l'agent : %v", err)
+	}
+	mine := []byte("a {>>m<<}{>>glose:v1 id=abcdef by=author<<} b")
+	if _, _, err := Amend(mine, 2, "glose:v1 id=zzzzzz", Author, NewGen(nil)); !errors.Is(err, ErrAmendMeta) {
+		t.Errorf("texte d'identifiant : %v", err)
+	}
+	if _, _, err := Amend(mine, 3, "x", Author, NewGen(nil)); !errors.Is(err, ErrNotFound) {
+		t.Errorf("position hors d'un message : %v", err)
+	}
+	if _, _, err := Amend(mine, 2, "m", Author, NewGen(nil)); !errors.Is(err, patch.ErrUnchanged) {
+		t.Errorf("message inchangé : %v", err)
+	}
+	// The technical comment is not a message: it cannot be amended.
+	if _, _, err := Amend(mine, bytes.Index(mine, []byte("{>>glose")), "x", Author, NewGen(nil)); !errors.Is(err, ErrNotFound) {
+		t.Errorf("commentaire technique : %v", err)
+	}
+}
+
+// Un commentaire écrit à la main, sans identité, reçoit la sienne en étant
+// modifié, attribuée à celui qui le modifie.
+func TestAmendGivesAHandWrittenCommentItsIdentity(t *testing.T) {
+	src := []byte("a {>>main<<} b")
+	e, _, err := Amend(src, 2, "neuf", Author, fixed("pqrstu"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out := string(e.Apply(src)); out != "a {>>neuf<<}{>>glose:v1 id=pqrstu by=author<<} b" {
+		t.Fatalf("%q", out)
+	}
+}
+
+// P10.6 (D-49): to= and via= in the technical comment.
+func TestMetaToAndVia(t *testing.T) {
+	m := Meta{ID: "abcd", By: Author, To: "Sol"}
+	b := m.Bytes()
+	if string(b) != "{>>glose:v1 id=abcd by=author to=Sol<<}" {
+		t.Fatalf("%s", b)
+	}
+	got, err := ParseMeta(b[3 : len(b)-3])
+	if err != nil || got != m {
+		t.Fatalf("%+v %v", got, err)
+	}
+	v := Meta{ID: "efgh", Re: "abcd", By: Agent, Via: "claude-opus"}
+	if got, err := ParseMeta(v.Bytes()[3 : len(v.Bytes())-3]); err != nil || got != v {
+		t.Fatalf("%+v %v", got, err)
+	}
+	for _, bad := range []string{"glose:v1 id=abcd to=Sol!", "glose:v1 id=abcd via=", "glose:v1 id=abcd to=" + strings.Repeat("a", 33)} {
+		if _, err := ParseMeta([]byte(bad)); err == nil {
+			t.Errorf("%q accepté", bad)
+		}
+	}
+}
+
+func TestAddressAndSignTouchOnlyTheNewMarks(t *testing.T) {
+	src := []byte("Un {==mot==}{>>ancien<<}{>>glose:v1 id=aaaa by=author<<} et une fin.\r\n")
+	gen := NewGen(map[string]bool{"aaaa": true})
+	at := strings.Index(string(src), "fin")
+	e, err := Comment(src, critic.Span{Start: at, End: at + 3}, "Pourquoi ?", Author, gen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain := e.Apply(src)
+	ea, err := Address(src, e, "Sol")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := ea.Apply(src)
+	// Only to=Sol is added, to the new annotation; the old one is intact.
+	if strings.Replace(string(out), " to=Sol", "", 1) != string(plain) || strings.Count(string(out), "to=Sol") != 1 {
+		t.Fatalf("%s", out)
+	}
+	if !strings.HasPrefix(string(out), "Un {==mot==}{>>ancien<<}{>>glose:v1 id=aaaa by=author<<} et une ") || !strings.HasSuffix(string(out), "\r\n") {
+		t.Fatalf("%s", out)
+	}
+	d := Read(out)
+	if a, _ := d.Find("aaaa"); a.Recipient() != "" {
+		t.Fatal("ancienne annotation adressée")
+	}
+	if len(d.Annotations) != 2 || d.Annotations[1].Recipient() != "Sol" {
+		t.Fatalf("%+v", d.Annotations)
+	}
+	// A reply of the author addressed to another agent changes the recipient.
+	r, _, err := Reply(out, d.Annotations[1].Span.Start, d.Annotations[1].ID, "Plutôt Luna.", Author, gen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err = Address(out, r, "Luna")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a := Read(r.Apply(out)).Annotations[1]; a.Recipient() != "Luna" || a.To != "Sol" {
+		t.Fatalf("%+v", a)
+	}
+	// via= on what the agent writes.
+	s, _, err := Reply(out, d.Annotations[0].Span.Start, "aaaa", "Corrigé.", Agent, gen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err = Sign(out, s, "Sol")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, _ := Read(s.Apply(out)).Find("aaaa")
+	if last := a.Messages[len(a.Messages)-1]; last.Via != "Sol" || last.By != Agent {
+		t.Fatalf("%+v", last)
+	}
+	if _, err := Address(src, e, "Sol Levant"); err == nil {
+		t.Fatal("nom invalide accepté")
+	}
+}
+
+// P10.11: the model of the agent, signed beside its name.
+func TestSignModel(t *testing.T) {
+	m := Meta{ID: "abcd", By: Agent, Via: "Sol", Model: "ollama-cloud/glm-5.3#high"}
+	b := m.Bytes()
+	if string(b) != "{>>glose:v1 id=abcd by=agent via=Sol model=ollama-cloud/glm-5.3#high<<}" {
+		t.Fatalf("%s", b)
+	}
+	if got, err := ParseMeta(b[3 : len(b)-3]); err != nil || got != m {
+		t.Fatalf("%+v %v", got, err)
+	}
+	if _, err := ParseMeta([]byte("glose:v1 id=abcd model=a<b")); err == nil {
+		t.Fatal("modèle invalide accepté")
+	}
+}
+
+// Codex audit: SignModel itself, byte for byte (BOM, mixed line endings, an
+// existing annotation left as it is), and a model without a name.
+func TestSignModelBytes(t *testing.T) {
+	src := []byte("\ufeffUn{>>Ancien.<<}{>>glose:v1 id=aaaa by=author<<} mot\r\net la suite.\n")
+	gen := NewGen(map[string]bool{"aaaa": true})
+	e, _, err := Reply(src, 3, "aaaa", "Réponse.", Agent, gen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain := string(e.Apply(src))
+	signed, err := SignModel(src, e, "Sol", "ollama-cloud/glm-5.3#high")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(signed.Apply(src))
+	if want := strings.Replace(plain, " by=agent<<}", " by=agent via=Sol model=ollama-cloud/glm-5.3#high<<}", 1); got != want {
+		t.Fatalf("%q\nattendu %q", got, want)
+	}
+	if !strings.HasPrefix(got, "\ufeffUn{>>Ancien.<<}{>>glose:v1 id=aaaa by=author<<}") || !strings.HasSuffix(got, " mot\r\net la suite.\n") {
+		t.Fatalf("%q", got)
+	}
+	anon, err := SignModel(src, e, "", "gpt-6.1-sol")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(anon.Apply(src)); got != strings.Replace(plain, " by=agent<<}", " by=agent model=gpt-6.1-sol<<}", 1) {
+		t.Fatalf("%q", got)
+	}
+}

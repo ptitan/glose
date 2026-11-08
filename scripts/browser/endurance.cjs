@@ -16,7 +16,7 @@ const hash = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
 const cases = [
   ['README.md', 'Glose shows a Markdown text, rendered, in your browser.', 'Glose renders a Markdown text in your browser.'],
   ['docs/TESTS-NAVIGATEUR.md', 'Aucune installation ni aucun téléchargement automatique.', 'Aucune installation ni aucun téléchargement ne sont lancés automatiquement.'],
-  ['docs/GUIDE.md', 'Ce guide s\'adresse à l\'auteur.', 'Ce guide est écrit pour l\'auteur.'],
+  ['docs/GUIDE.md', 'Une navette est une suite de tours.', 'Une navette se compose de tours.'],
 ];
 const summary = (samples) => {
   const sorted = [...samples].sort((a, b) => a - b);

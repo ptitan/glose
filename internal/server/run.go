@@ -94,6 +94,14 @@ func Serve(p *project.Project) error {
 	lost := make(chan struct{})
 	go watchState(p.State(), statePath, st, data, lock, lost, watchDone, watchEnded)
 
+	// An agent launched by a server stopped during its turn is stopped at
+	// its deadline (P10.5).
+	runDone := make(chan struct{})
+	defer close(runDone)
+	go s.runner.Watch(p.State(), 30*time.Second, runDone)
+	// A turn with several recipients interrupted by a restart (P10.6).
+	s.resumePasses()
+
 	srv := &http.Server{Handler: s.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)

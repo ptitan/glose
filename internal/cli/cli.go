@@ -19,12 +19,14 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/ptitan/glose/internal/agents"
 	"github.com/ptitan/glose/internal/critic"
 	"github.com/ptitan/glose/internal/journal"
 	"github.com/ptitan/glose/internal/navette"
 	"github.com/ptitan/glose/internal/project"
 	"github.com/ptitan/glose/internal/projection"
 	"github.com/ptitan/glose/internal/render"
+	"github.com/ptitan/glose/internal/review"
 	"github.com/ptitan/glose/internal/server"
 	"github.com/ptitan/glose/internal/store"
 )
@@ -58,6 +60,10 @@ Commandes de l'auteur :
             ouvre le projet entier, avec cette partie mise en avant
               --no-browser   n'ouvre pas le navigateur
   stop      arrête le serveur du projet
+  set       ouvre les réglages des agents (tous les projets) : agents
+            installés, noms courts (agent + modèle), agent par défaut
+              --list         les affiche sans ouvrir le navigateur
+              --no-browser   n'ouvre pas le navigateur
   init      crée un profil glose.json s'il n'y en a pas (fichiers de la racine,
             puis un dossier par sous-dossier : à trier), et écrit la section
             « Navette Glose » dans AGENTS.md (ou CLAUDE.md s'il est seul)
@@ -73,6 +79,11 @@ Commandes de la navette (auteur et agent) :
               --kind K       comment, highlight, addition, deletion, substitution
               --status S     new (de ce tour) ou open (remise, en attente)
               --by B         author ou agent
+              --mine         pendant un tour à plusieurs agents, celles qui ne
+                             sont pas confiées aux agents lancés par Glose
+              --to NOM       les annotations que doit traiter ce nom court
+                             (glose set) ; sans destinataire, ou avec un
+                             nom inconnu ici : le nom court par défaut
               --file F       un fichier, ou un dossier terminé par / (relatif
                              au projet ; par défaut, la partie donnée en chemin)
   wait      attend que la main soit au rôle demandé, et rend la main aussitôt
@@ -84,6 +95,15 @@ Commandes de la navette (auteur et agent) :
   log       l'histoire : tours, opérations, décisions archivées
               --turn N       un seul tour
               --json         sortie JSON
+
+Lier une session d'agent à un Glose ouvert à la main :
+  join      glose join CODE [--agent NOM] [--model M] : le code est donné par
+            l'interface (menu de la navette, « Lier un agent ») ; il lie la
+            session, puis attend que l'auteur lui remette la main et affiche
+            alors les consignes du tour. Code 3 après --timeout (90s par
+            défaut) : relancer la même commande, qui sert aussi à attendre
+            chaque tour suivant (le code reste à cet agent jusqu'au prochain).
+            --model : le modèle de l'agent, quand il ne se lit pas chez lui
 
 Commandes de l'agent (pendant son tour) :
   done      remet le tour à l'auteur : les modifications libres des fichiers
@@ -99,7 +119,11 @@ Commandes de l'agent (pendant son tour) :
               --id ID --new TEXTE [--note TEXTE]   (passage commenté par l'auteur, ou correction d'une proposition)
   comment   commente un passage, ou un point après un texte
               --file F (--find TEXTE | --after TEXTE) --text TEXTE
-  Pour ces quatre commandes : TEXTE vaut « - » pour le lire sur l'entrée
+  Pour wait, done, reply, propose et comment (et status, list s'il est
+  donné) : --agent NOM, ou la variable GLOSE_AGENT, nomme l'agent ; son
+  signe de vie (.glose/agent.json, non normatif) dit à l'auteur qui écoute,
+  qui a la main et ce qu'il écrit.
+  Pour reply, propose, comment et done : TEXTE vaut « - » pour le lire sur l'entrée
   standard (une seule option par commande ; dernier saut de ligne retiré),
   et --json donne une sortie JSON (identifiants créés ; pour done, le
   curseur seq de glose wait --after).
@@ -188,6 +212,10 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return cmdPropose(rest, stdout, stderr)
 	case "reply":
 		return cmdReply(rest, stdout, stderr)
+	case "join":
+		return cmdJoin(rest, stdout, stderr)
+	case "set":
+		return cmdSet(rest, stdout, stderr)
 	case "serve":
 		return cmdServe(rest, stderr)
 	default:
@@ -198,7 +226,7 @@ func Run(args []string, stdout, stderr io.Writer) int {
 // valueFlags are the options that take a value: the word after them is that
 // value, even if it starts with a dash.
 var valueFlags = map[string]bool{"file": true, "find": true, "after": true, "id": true, "text": true, "new": true, "note": true,
-	"kind": true, "status": true, "by": true, "role": true, "timeout": true, "turn": true, "to": true, "view": true}
+	"kind": true, "status": true, "by": true, "role": true, "timeout": true, "turn": true, "to": true, "view": true, "agent": true, "model": true}
 
 // relPath normalises a path of the project typed by the user: forward
 // slashes, without a leading « ./ » (or « .\ » under Windows).
@@ -293,6 +321,9 @@ func cmdOpen(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "Projet entier ouvert à %s, avec %s mis en avant.\n", p.Root, p.Focus)
 	}
 	fmt.Fprintf(stdout, "Ouvrir : %s\nArrêter : glose stop\n", url)
+	if !agentsConfigured() {
+		fmt.Fprintln(stdout, noAgentLine)
+	}
 	if !noBrowser && os.Getenv("GLOSE_NO_BROWSER") == "" {
 		if err := server.OpenBrowser(url); err != nil {
 			fmt.Fprintf(stderr, "glose : navigateur non ouvert (%v) ; copiez l'adresse.\n", err)
@@ -390,6 +421,19 @@ type listItem struct {
 	// Context is the paragraph that holds the annotation, as it reads now
 	// (without comments, proposals not applied).
 	Context string `json:"context"`
+	// To is the short name of the agent that must answer (D-49), "" for
+	// the default one; Via the agent that wrote a proposal of the agent.
+	To    string `json:"to,omitempty"`
+	Via   string `json:"via,omitempty"`
+	Model string `json:"model,omitempty"` // model of that agent (P10.11)
+}
+
+// modelSuffix writes « , model » after the name of an agent.
+func modelSuffix(m string) string {
+	if m == "" {
+		return ""
+	}
+	return ", " + m
 }
 
 type listIssue struct {
@@ -402,9 +446,13 @@ type listIssue struct {
 
 func cmdList(args []string, stdout, stderr io.Writer) int {
 	var asJSON bool
-	var kind, file, status, by string
+	var kind, file, status, by, agent, to string
+	var mine bool
 	path, ok := parse("list", args, stderr, func(fs *flag.FlagSet) {
+		fs.StringVar(&to, "to", "", "")
+		fs.BoolVar(&mine, "mine", false, "")
 		fs.BoolVar(&asJSON, "json", false, "")
+		fs.StringVar(&agent, "agent", "", "")
 		fs.StringVar(&kind, "kind", "", "")
 		fs.StringVar(&file, "file", "", "")
 		fs.StringVar(&status, "status", "", "")
@@ -423,9 +471,68 @@ func cmdList(args []string, stdout, stderr io.Writer) int {
 	if status != "" && status != navette.StatusNew && status != navette.StatusOpen {
 		return usageError(stderr, fmt.Sprintf("list : statut inconnu %q (new ou open)", status))
 	}
+	agentName, explicit, err := agentIdentity(agent)
+	if err != nil {
+		return usageError(stderr, "list : "+err.Error())
+	}
+	if to != "" && !review.ValidName(to) {
+		return usageError(stderr, fmt.Sprintf("list : nom court invalide %q", to))
+	}
+	if mine && to != "" {
+		return usageError(stderr, "list : --mine ou --to, pas les deux")
+	}
 	p, err := project.Load(path)
 	if err != nil {
 		return failure(stderr, err)
+	}
+	if explicit {
+		touchAgent(p, agentName, navette.ActRead)
+	}
+	// --to: the annotations that this agent must answer (D-49). Without a
+	// recipient, or with one unknown on this machine, it is the agent of
+	// the text (glose.json), else the default one.
+	cfg, _ := agents.Load()
+	def := cfg.Default
+	if al, ok := cfg.Alias(p.Agent.Alias); ok {
+		def = al.Name
+	}
+	recipient := func(a render.Annotation) string {
+		if a.To != "" {
+			if al, ok := cfg.Alias(a.To); ok {
+				return al.Name
+			}
+		}
+		return def
+	}
+	// During a turn with several recipients (P10.6), the routing fixed in
+	// the plan at the handover: --to gives the annotations of a pass, --mine
+	// (a session bound to Glose) what no pass takes.
+	var plan *navette.Passes
+	launched := map[string]bool{}
+	if hh, err := navette.New(p).History(); err == nil && hh.Hand() == review.Agent {
+		if ps := navette.ReadPasses(p.State()); ps != nil && ps.Turn == hh.Turn() {
+			plan = ps
+			for _, x := range ps.Passes {
+				launched[strings.ToLower(x.Alias)] = true
+			}
+		}
+	}
+	wanted := func(a render.Annotation) bool {
+		if mine {
+			if a.ID != "" {
+				_, taken := plan.Assigned(a.ID)
+				return !taken
+			}
+			return !launched[strings.ToLower(recipient(a))]
+		}
+		if to == "" {
+			return true
+		}
+		if pass, ok := plan.Find(to); ok && a.ID != "" {
+			got, taken := plan.Assigned(a.ID)
+			return taken && got.Alias == pass.Alias
+		}
+		return strings.EqualFold(recipient(a), to) || (def == "" && strings.EqualFold(a.To, to))
 	}
 	h, err := navette.New(p).History()
 	if err != nil {
@@ -454,9 +561,9 @@ func cmdList(args []string, stdout, stderr io.Writer) int {
 		}
 		navette.Annotate(fm.Annotations, h)
 		for _, a := range fm.Annotations {
-			if (kind == "" || a.Kind == kind) && (status == "" || a.Status == status) && (by == "" || a.By == by) {
+			if (kind == "" || a.Kind == kind) && (status == "" || a.Status == status) && (by == "" || a.By == by) && wanted(a) {
 				items = append(items, listItem{File: fm.Path, ID: a.ID, By: a.By, Status: a.Status, Turn: a.Turn, Messages: a.Messages, Line: a.Line, Column: a.Column, Start: a.Start, End: a.End,
-					Kind: a.Kind, Text: a.Text, New: a.New, Comments: a.Comments, Context: annotationContext(fm.Src, a.Start, a.End)})
+					Kind: a.Kind, Text: a.Text, New: a.New, Comments: a.Comments, Context: annotationContext(fm.Src, a.Start, a.End), To: a.To, Via: a.Via, Model: a.Model})
 			}
 		}
 		for _, is := range fm.Issues {
@@ -488,12 +595,23 @@ func cmdList(args []string, stdout, stderr io.Writer) int {
 		if id == "" {
 			id = "sans identifiant"
 		}
-		fmt.Fprintf(stdout, "%s:%d:%d  [%s%s]  %s  %s\n", it.File, it.Line, it.Column, id, actorSuffix(it.By), names[it.Kind], what)
+		dest := ""
+		if it.To != "" {
+			dest = "  → " + it.To
+		}
+		if it.Via != "" {
+			dest += "  (par " + it.Via + modelSuffix(it.Model) + ")"
+		}
+		fmt.Fprintf(stdout, "%s:%d:%d  [%s%s]  %s  %s%s\n", it.File, it.Line, it.Column, id, actorSuffix(it.By), names[it.Kind], what, dest)
 		for _, m := range it.Messages {
 			if it.Kind == "comment" && !m.Reply {
 				continue
 			}
-			fmt.Fprintf(stdout, "    ↳ %s%s\n", actorPrefix(m.By), oneLine(m.Text, 120))
+			who := actorPrefix(m.By)
+			if m.Via != "" {
+				who = "(" + m.Via + modelSuffix(m.Model) + ") "
+			}
+			fmt.Fprintf(stdout, "    ↳ %s%s\n", who, oneLine(m.Text, 120))
 		}
 	}
 	for _, pb := range problems {
@@ -594,6 +712,15 @@ func cmdCheck(args []string, stdout, stderr io.Writer) int {
 					msg = fmt.Sprintf("%d marques écrites dans du code sont laissées telles quelles, la première ici : ce ne sont pas des annotations (D-24)", len(lit))
 				}
 				add("warning", fmt.Sprintf("%s:%d:%d", fm.Path, l, c), msg)
+			}
+		}
+		// The agent asked by the text (P10.3): its short name must exist on
+		// this machine, or the default one is taken.
+		if a := p.Agent.Alias; a != "" {
+			if c, err := agents.Load(); err == nil {
+				if _, ok := c.Alias(a); !ok {
+					add("warning", "agent", fmt.Sprintf("%s demande le nom court %q, inconnu sur cette machine : le nom court par défaut sera pris (glose set)", project.ProfileName, a))
+				}
 			}
 		}
 		// The journal and its agreement with the files (SPEC F19).

@@ -82,8 +82,8 @@ async function openSocket(endpoint, windowsFromWSL) {
     const lines = readline.createInterface({ input: child.stdout });
     await new Promise((resolve, reject) => {
       let ready = false;
-      const timer = setTimeout(() => { child.kill(); reject(new Error('Délai du relais CDP Windows')); }, 10000);
-      const fail = (err) => { clearTimeout(timer); reject(new Error('Relais CDP : Node.js Windows 22+ requis (GLOSE_WINDOWS_NODE). ' + err.message)); };
+      const timer = setTimeout(() => { child.kill(); reject(new Error('Délai du relais Windows du navigateur')); }, 10000);
+      const fail = (err) => { clearTimeout(timer); reject(new Error('Relais du navigateur : Node.js Windows 22+ requis (GLOSE_WINDOWS_NODE). ' + err.message)); };
       child.on('error', fail);
       let log = '';
       child.stderr.on('data', (b) => { log = (log + b).slice(-2000); });
@@ -99,9 +99,9 @@ async function openSocket(endpoint, windowsFromWSL) {
   }
   const ws = new WebSocket(endpoint);
   await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => { ws.close(); reject(new Error('Chrome ne répond pas sur son port local CDP')); }, 10000);
+    const timer = setTimeout(() => { ws.close(); reject(new Error('Le navigateur ne répond pas sur son port local')); }, 10000);
     ws.addEventListener('open', () => { clearTimeout(timer); resolve(); }, { once: true });
-    ws.addEventListener('error', () => { clearTimeout(timer); reject(new Error('Connexion locale CDP impossible')); }, { once: true });
+    ws.addEventListener('error', () => { clearTimeout(timer); reject(new Error('Connexion locale au navigateur impossible')); }, { once: true });
   });
   return ws;
 }
@@ -181,7 +181,9 @@ class Page {
     return result.result.value;
   }
   async wait(description, fn, ...args) { return until(description, () => this.evaluate(fn, ...args)); }
-  async navigate(url) {
+  // selector: for a page other than the interface (the settings of the
+  // agents), the element that tells it is loaded.
+  async navigate(url, selector) {
     const marker = String(Date.now()) + ':' + Math.random();
     await this.evaluate((marker) => { window.__gloseOldDocument = marker; }, marker);
     // A fragment-only navigation would NOT reload the app. A disposable query
@@ -196,7 +198,8 @@ class Page {
       if (result.errorText) throw new Error(result.errorText);
       return true;
     });
-    await this.wait('chargement d’un nouveau document Glose', (marker) => window.__gloseOldDocument !== marker && document.querySelector('#texte')?.getAttribute('aria-busy') === 'false' && !!document.querySelector('#texte span[data-g]'), marker);
+    if (selector) await this.wait('chargement de ' + selector, (marker, selector) => window.__gloseOldDocument !== marker && document.readyState === 'complete' && !!document.querySelector(selector), marker, selector);
+    else await this.wait('chargement d’un nouveau document Glose', (marker) => window.__gloseOldDocument !== marker && document.querySelector('#texte')?.getAttribute('aria-busy') === 'false' && !!document.querySelector('#texte span[data-g]'), marker);
     await this.evaluate(() => {
       window.__gloseTest = { events: [], requests: [] };
       for (const type of ['click', 'submit', 'cancel', 'close']) document.addEventListener(type, (e) => {
@@ -253,7 +256,7 @@ class Page {
     await this.send('Input.insertText', { text });
   }
   async key(key, modifiers = 0) {
-    const special = { Enter: 13, Escape: 27, Tab: 9, Backspace: 8 };
+    const special = { Enter: 13, Escape: 27, Tab: 9, Backspace: 8, ArrowUp: 38, ArrowDown: 40 };
     const code = special[key] || key.toUpperCase().charCodeAt(0);
     const physical = special[key] ? key : /^[0-9]$/.test(key) ? 'Digit' + key : 'Key' + key.toUpperCase();
     const params = { key, code: physical, windowsVirtualKeyCode: code, modifiers };
@@ -266,4 +269,5 @@ class Page {
   }
 }
 
-module.exports = { launchChrome, until, pause };
+// The relay and the WSL helpers also serve the Firefox driver (bidi.cjs).
+module.exports = { launchChrome, until, pause, openSocket, windowsEnv, wslPath };

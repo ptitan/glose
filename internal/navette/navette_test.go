@@ -448,3 +448,66 @@ func TestFileReplacedByALinkToTheOutsideIsNotWritten(t *testing.T) {
 		t.Fatalf("copie extérieure modifiée : %q", b)
 	}
 }
+
+// P9.1 : un message modifié laisse sa version précédente au journal, sans
+// rien clore ni créer ; une réponse aussi, même sur une proposition.
+func TestRevisionsOfAmendedMessages(t *testing.T) {
+	before := []byte("a {==p==}{>>vieux<<}{>>glose:v1 id=abcdef by=author<<} b {++x++}{>>glose:v1 id=ghijkm by=agent<<}{>>avant<<}{>>glose:v1 id=npqrst re=ghijkm by=author<<}\n")
+	after := []byte("a {==p==}{>>neuf<<}{>>glose:v1 id=abcdef by=author<<} b {++x++}{>>glose:v1 id=ghijkm by=agent<<}{>>après<<}{>>glose:v1 id=npqrst re=ghijkm by=author<<}\n")
+	created, closed := Compare("a.md", before, after, "")
+	if len(created) != 0 || len(closed) != 0 {
+		t.Fatalf("créés %v, clos %+v", created, closed)
+	}
+	rev := Revisions("a.md", before, after)
+	if len(rev) != 2 || rev[0].ID != "abcdef" || rev[0].Text != "vieux" || rev[0].Kind != "message" || rev[0].Decision != Revise ||
+		rev[1].ID != "npqrst" || rev[1].Text != "avant" || rev[1].By != review.Author {
+		t.Fatalf("révisions %+v", rev)
+	}
+	// Nothing changed: no revision.
+	if rev := Revisions("a.md", before, before); len(rev) != 0 {
+		t.Fatalf("révisions sans changement : %+v", rev)
+	}
+}
+
+// Le statut de chaque message : « new » tant qu'il n'a pas été remis.
+func TestAnnotateMessages(t *testing.T) {
+	w := newWorld(t, map[string]string{"a.md": "Un {>>c<<} texte.\n"})
+	w.do(review.Author, 0, "identify", "", func(src []byte, gen *review.Gen) (patch.Edit, error) {
+		out, err := review.Assign(src, 0, len(src), review.Author, gen)
+		return review.Diff(src, out), err
+	})
+	if _, err := w.n.Handoff(review.Author, ""); err != nil {
+		t.Fatal(err)
+	}
+	// The agent replies; the author's comment was handed over, the reply not yet.
+	w.do(review.Agent, 0, "reply", "", func(src []byte, gen *review.Gen) (patch.Edit, error) {
+		e, _, err := review.Reply(src, 3, "", "réponse", review.Agent, gen)
+		return e, err
+	})
+	st, h, f, err := w.n.State()
+	if err != nil || st.Hand != review.Agent {
+		t.Fatalf("%+v %v", st, err)
+	}
+	anns := f.Annot[0]
+	Annotate(anns, h)
+	if len(anns) != 1 || len(anns[0].Messages) != 2 || anns[0].Status != StatusOpen ||
+		anns[0].Messages[0].Status != StatusOpen || anns[0].Messages[1].Status != StatusNew {
+		t.Fatalf("%+v", anns)
+	}
+}
+
+// P9.3 : ce que la main va remettre, compté sur tout le projet.
+func TestStateCountsThisTurn(t *testing.T) {
+	w := newWorld(t, map[string]string{
+		"a.md": "Un {>>c<<}{>>glose:v1 id=abcdef by=author<<} texte {++ajout++}.\n",
+		"b.md": "Deux {~~x~>y~~}{>>glose:v1 id=ghijkm by=agent<<}{>>pourquoi ?<<}{>>glose:v1 id=npqrst re=ghijkm by=author<<} fin.\n",
+	})
+	st, _, _, err := w.n.State()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The agent's proposal is not the author's; the hand-written addition is.
+	if st.Hand != review.Author || st.ThisTurn["comments"] != 1 || st.ThisTurn["proposals"] != 1 || st.ThisTurn["replies"] != 1 {
+		t.Fatalf("%+v", st.ThisTurn)
+	}
+}

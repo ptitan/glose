@@ -15,10 +15,10 @@
     "edition", "edition-texte", "edition-message", "edition-ok", "edition-fermer",
     "bouton-reglages", "reglages", "r-police", "r-taille", "r-taille-val", "r-interligne", "r-interligne-val",
     "r-largeur", "r-largeur-val", "r-justifie", "r-defaut", "menu-selection", "bouton-suggerer", "edition-note",
-    "edition-titre", "edition-info", "navette", "remettre", "remise", "remise-titre", "remise-info", "remise-note",
+    "edition-titre", "edition-info", "navette", "remettre", "remise", "remise-titre", "remise-info", "remise-alerte", "remise-lier", "remise-lancement", "remise-lancer", "saisie-pour-ligne", "edition-pour-ligne", "remise-note",
     "remise-message", "remise-ok", "remise-force", "remise-fermer", "edition-source", "edition-voir", "edition-apercu",
     "edition-rendu", "edition-changements", "edition-mef", "edition-visuel", "edition-outils", "edition-aide-source", "vues", "edition-elargir", "edition-types", "menu-avant", "menu-apres", "remettre-texte", "remettre-icone",
-    "bandeau-agent", "bandeau-reprendre", "boite", "boite-icone", "boite-titre", "boite-message", "boite-champs", "boite-erreur", "boite-ok", "boite-annuler", "edition-tenant", "edition-tenant-case",
+    "carte-tour", "puces", "navette-annonce", "rail", "rail-ouvrir", "boite", "boite-icone", "boite-titre", "boite-message", "boite-champs", "boite-erreur", "boite-ok", "boite-annuler", "edition-tenant", "edition-tenant-case",
     "onglets", "onglet-compte", "onglet-titre", "poignee-colonne", "cote", "app", "annotations", "filtres", "annotations-liste", "historique", "fichiers",
     "bouton-brouillons", "brouillons-compte", "brouillons", "brouillons-contenu", "brouillons-fermer", "saisie-brouillon", "edition-brouillon"]) {
     UI[id] = document.getElementById(id);
@@ -263,6 +263,7 @@
   const brouillons = GloseBrouillons.creer({ api, stockage: stockageBrouillons,
     identifiant: () => crypto.randomUUID().replaceAll("-", ""), changement: (entrees, avertissement) => {
       $("brouillons-compte").textContent = String(entrees.length);
+      $("bouton-brouillons").classList.toggle("plein", entrees.length > 0);
       for (const type of ["saisie", "edition"]) {
         const x = S[type], e = x && x.brouillon;
         const p = $(type + "-brouillon");
@@ -277,11 +278,11 @@
     const x = S[type];
     if (!x || !S.doc || !S.doc.files[x.file]) return null;
     const edit = type === "edition";
-    return { kind: edit ? "edit" : x.mode === "reply" ? "reply" : "comment",
+    return { kind: edit ? "edit" : x.mode === "reply" ? "reply" : x.mode === "amend" ? "amend" : "comment",
       path: S.doc.files[x.file].path, hash: x.hash, mode: x.mode,
       start: x.start || 0, end: x.end || 0, at: x.at || 0, to: x.to || 0, annotation: x.annotation || 0,
       annotationID: x.annotationID || "", proposalKind: x.kind || "", old: x.ancien || "",
-      original: edit ? x.original : "", text: edit ? texteEdition() : $("saisie-texte").value,
+      original: x.original || "", text: edit ? texteEdition() : $("saisie-texte").value,
       note: edit ? $("edition-note").value : "", excerpt: x.extrait || (edit ? x.original : ""), prefix: x.prefixe || "",
       where: x.where || "", tight: !!x.tight, whole: edit && $("edition-tenant").checked,
       editor: edit ? S.modeEdition : "source", title: $(type + "-titre").textContent,
@@ -293,7 +294,7 @@
     const x = S[type], d = contenuBrouillon(type);
     if (!d) return null;
     if (!x.brouillon || x.brouillon.closed) {
-      if (d.kind === "edit" ? d.text === d.original && !d.note : !d.text) return null;
+      if (d.kind === "edit" ? d.text === d.original && !d.note : d.kind === "amend" ? d.text.trim() === d.original.trim() : !d.text) return null;
       x.brouillon = brouillons.nouveau(d);
     } else brouillons.modifier(x.brouillon, d);
     x.brouillon.active = true;
@@ -337,7 +338,7 @@
     if (!brouillons.entrees.size) liste.append(el("p", "", "Aucun brouillon."));
     for (const e of brouillons.entrees.values()) {
       const d = e.draft, bloc = el("section", "brouillon");
-      bloc.append(el("h3", "", (d.kind === "edit" ? "Réécriture" : d.kind === "reply" ? "Réponse" : "Commentaire") + " · " + d.path));
+      bloc.append(el("h3", "", (d.kind === "edit" ? "Réécriture" : d.kind === "reply" ? "Réponse" : d.kind === "amend" ? "Message modifié" : "Commentaire") + " · " + d.path));
       if (d.excerpt) bloc.append(el("blockquote", "", d.excerpt));
       const texte = el("textarea"); texte.readOnly = true; texte.value = d.text;
       texte.setAttribute("aria-label", "Texte du brouillon à copier"); bloc.append(texte);
@@ -365,7 +366,7 @@
             annotation: d.annotation, annotationID: d.annotationID, kind: d.proposalKind, ancien: d.old, original: d.original, brouillon: e }, d);
         } else {
           S.saisie = { mode: d.mode, file, hash: d.hash, start: d.start, end: d.end, extrait: d.excerpt, prefixe: d.prefix,
-            annotationID: d.annotationID, brouillon: e };
+            annotationID: d.annotationID, original: d.original, reponse: d.title.startsWith("Modifier votre réponse"), brouillon: e };
           ouvrirSaisie(d.title, d.excerpt, "Brouillon récupéré.", d.text);
         }
       });
@@ -434,6 +435,22 @@
   const etroit = matchMedia("(max-width: 1050px)");
   function appliquerGrille() {
     $("app").style.gridTemplateColumns = $("cote").hidden || etroit.matches || !S.colonne ? "" : S.colonne + "rem minmax(0, 1fr)";
+  }
+
+  // Masquer la colonne laisse un rail à gauche : rouvrir, ou aller droit à
+  // un onglet (P9.2). Le choix est retenu d'une session à l'autre.
+  function montrerColonne(ouvrir, discret) {
+    const c = $("cote");
+    if (c.hidden === !ouvrir) return;
+    c.hidden = !ouvrir;
+    $("rail").hidden = ouvrir;
+    $("app").classList.toggle("sans-colonne", !ouvrir);
+    $("bouton-sommaire").setAttribute("aria-expanded", String(ouvrir));
+    $("rail-ouvrir").setAttribute("aria-expanded", String(ouvrir));
+    localStorage.setItem("glose-colonne-masquee", ouvrir ? "0" : "1");
+    appliquerGrille();
+    disposer();
+    if (!discret) (ouvrir ? $("bouton-sommaire") : $("rail-ouvrir")).focus({ preventScroll: true });
   }
 
   function brancherColonne() {
@@ -517,6 +534,8 @@
 
   const navigation = GloseNavigation.creer({ api, courant: () => ({ doc: S.doc, zone: zone() }),
     afficherPartie: choisirPartie, avis, amener: (cible) => amener(cible, Math.max(100, document.getElementById("barre").getBoundingClientRect().height + 24)) });
+  const agents = GloseAgents.creer({ api, etat: () => S.doc && S.doc.state, avis, jeton: () => S.jeton, doc: () => S.doc,
+    recharger: () => charger(true) });
   const recherche = GloseRecherche.creer({ api, courant: () => ({ doc: S.doc, view: vueServeur(S.vue) }),
     ouvrir: (m) => navigation.ouvrir(m, m.hash), avis });
 
@@ -718,6 +737,8 @@
     d.files.forEach((f) => { S.hashes[f.index] = f.hash; });
     bandeau("");
     $("titre").textContent = d.title;
+    $("titre").dataset.infobulle = d.title;
+    document.title = d.title && d.title !== "Glose" ? d.title + " · Glose" : "Glose";
     document.title = d.title + " — Glose";
     const texte = $("texte");
     // Le bloc survolé appartient à l'ancien affichage : on l'oublie.
@@ -1433,8 +1454,14 @@
     tete.append(el("span", "num", String(i + 1)), el("span", "", nom));
     // À qui est la proposition : c'est elle que décident Accepter et Rejeter,
     // quoi que disent les réponses du fil.
-    if (PROPOSITION[a.kind] && QUI[a.by]) tete.append(el("span", "qui", a.by === "author" ? "Vous" : a.by === "agent" ? "Agent" : QUI[a.by]));
+    if (PROPOSITION[a.kind] && QUI[a.by]) {
+      const q = el("span", "qui", a.by === "author" ? "Vous" : a.by === "agent" ? (a.via || "Agent") + (a.model ? " · " + modeleCourt(a.model) : "") : QUI[a.by]);
+      if (a.model) q.dataset.infobulle = (a.via || "Agent") + " : " + a.model;
+      tete.append(q);
+    }
     if (a.status === "new") tete.append(el("span", "nouveau", "ce tour"));
+    // Le destinataire (P10.6) et l'agent qui a écrit une proposition.
+    if (a.to) { const d = el("span", "pour", "→ " + a.to); d.dataset.infobulle = "Réponse demandée à " + a.to; tete.append(d); }
     tete.append(el("span", "espace"), el("span", "", "l. " + a.line));
     tete.dataset.infobulle = lieu + ", ligne " + a.line;
     c.append(tete);
@@ -1457,8 +1484,18 @@
     for (const m of a.messages) {
       if (m.fix) { c.append(blocCorrection(a, m)); continue; }
       const p = el("p", "msg" + (m.by === "agent" ? " agent" : ""));
-      if (QUI[m.by]) p.append(el("span", "qui", QUI[m.by]));
+      if (QUI[m.by]) {
+        const q = el("span", "qui", m.by === "agent" ? (m.via || QUI[m.by]) + (m.model ? " · " + modeleCourt(m.model) : "") : QUI[m.by]);
+        if (m.model) q.dataset.infobulle = (m.via || QUI[m.by]) + " : " + m.model;
+        p.append(q);
+      }
+      if (m.by === "author" && m.to && m.reply) p.append(el("span", "pour", "→ " + m.to));
       p.append(document.createTextNode(m.text));
+      if (m.reply && modifiable(m)) {
+        // Votre réponse, pas encore remise : elle se modifie ou se retire.
+        p.classList.add("a-vous");
+        p.append(outilsMessage(a, m, i));
+      }
       c.append(p);
     }
     const outils = el("div", "outils");
@@ -1474,10 +1511,15 @@
     };
     bouton("Répondre", "Répondre dans le fil de cette annotation", "repondre", () => repondre(a, i), "Répondre (touche R)");
     if (a.kind === "comment" || a.kind === "highlight") {
+      const tete = teteModifiable(a);
+      if (tete) {
+        bouton("Modifier", "Modifier votre commentaire, qui n'a pas encore été remis à l'agent", "corriger", () => modifier(a, tete, i), "Modifier (touche E)");
+        outils.lastChild.classList.add("neutre"); // l'orange est celui des propositions
+      }
       if (a.status === "new") bouton("Retirer", "Retirer cette annotation, qui n'a pas encore été remise à l'agent", "retirer", () => retirer(a));
       else bouton("Résoudre", "Clore la discussion : les marques disparaissent du fichier, le fil est gardé au journal", "resoudre", () => resoudre(a));
     } else {
-      if (corrigeable(a)) bouton("Corriger", "Corriger votre proposition : elle reste une seule proposition, avec son fil", "corriger", () => corriger(a, i), "Corriger (touche E)");
+      if (corrigeable(a)) bouton("Modifier", "Modifier votre proposition : elle reste une seule proposition, avec son fil", "corriger", () => corriger(a, i), "Modifier (touche E)");
       // Ce que décide chaque bouton, sans ambiguïté : la proposition de la
       // carte (la vôtre ou celle de l'agent), jamais un texte d'une réponse.
       const de = a.by === "author" ? "votre proposition" : a.by === "agent" ? "la proposition de l'agent" : "la proposition";
@@ -1497,6 +1539,9 @@
     }
     c.append(outils);
     c.addEventListener("click", () => activer(i, true));
+    // Une carte longue repliée (P9.4) se déplie dès que le focus y entre
+    // (Tab vers ses boutons) : jamais de bouton caché sous le fondu.
+    c.addEventListener("focusin", () => { if (S.actif !== i) { activer(i, false); c.scrollTop = 0; } });
     c.addEventListener("keydown", (e) => {
       if (e.target === c && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); activer(i, true); }
     });
@@ -1524,8 +1569,11 @@
     if (S.doc && S.doc.state && S.doc.state.hand === "agent") { avis("L'agent a la main : vous ne pouvez pas écrire avant qu'il vous la rende.", true); return true; }
     if (k === "r") { repondre(a, S.actif); return true; }
     if (k === "e") {
+      const tete = !PROPOSITION[a.kind] && teteModifiable(a);
       if (corrigeable(a)) corriger(a, S.actif);
-      else avis(PROPOSITION[a.kind] ? "Seules vos propositions se corrigent ; répondez (R) pour demander une correction à l'agent." : "E corrige une proposition : cette annotation est une discussion.", true);
+      else if (tete) modifier(a, tete, S.actif);
+      else avis(PROPOSITION[a.kind] ? "Seules vos propositions se modifient ; répondez (R) pour demander une correction à l'agent."
+        : "Seuls vos commentaires pas encore remis à l'agent se modifient ; répondez (R) dans le fil.", true);
       return true;
     }
     if (!PROPOSITION[a.kind]) { avis((k === "a" ? "A accepte" : "X rejette") + " une proposition : cette annotation est une discussion (R pour répondre).", true); return true; }
@@ -1553,26 +1601,39 @@
       c.badge.classList.add("g-actif");
       if (defiler) c.badge.scrollIntoView({ block: "center", behavior: douceur() });
     }
+    disposer(); // la carte dépliée peut dépasser le bas de la marge (P9.4)
   }
 
   // Place les cartes en face de leur ancre, sans chevauchement. Toutes les
   // mesures sont lues avant toute écriture : une seule mise en page.
+  // Cartes longues (P9.4) : repliées, elles ne dépassent pas CARTE_MAX
+  // pixels (style.css, --carte-max), avec un fondu ; la carte active se
+  // déplie par-dessus les autres. La disposition compte toujours la hauteur
+  // repliée : déplier une carte ne déplace jamais ses voisines.
+  const CARTE_MAX = 168;
   function disposerMaintenant() {
     const marge = $("marge");
     if (!S.cartes.length) { marge.style.minHeight = ""; return; }
-    if (getComputedStyle(S.cartes[0].carte).position !== "absolute") { marge.style.minHeight = ""; return; }
+    const absolue = getComputedStyle(S.cartes[0].carte).position === "absolute";
     const base = marge.getBoundingClientRect().top;
-    const liste = S.cartes.map((c) => ({
-      c, y: c.badge ? c.badge.getBoundingClientRect().top - base - 6 : Infinity, h: c.carte.offsetHeight,
-    }));
+    const liste = S.cartes.map((c) => {
+      // Hauteur entière (contenu, marges intérieures et bords) ; la place
+      // réservée est la hauteur repliée, active ou non : rien ne bouge.
+      const plein = c.carte.scrollHeight + (c.carte.offsetHeight - c.carte.clientHeight);
+      return { c, y: c.badge ? c.badge.getBoundingClientRect().top - base - 6 : Infinity, plein,
+        longue: plein > CARTE_MAX + 1, h: Math.min(plein, CARTE_MAX) };
+    });
+    for (const x of liste) x.c.carte.classList.toggle("longue", x.longue);
+    if (!absolue) { marge.style.minHeight = ""; return; }
     liste.sort((x, y) => x.y - y.y);
-    let bas = 0;
+    let bas = 0, fond = 0;
     for (const x of liste) {
       x.top = Math.max(x.y === Infinity ? bas : x.y, bas);
       bas = x.top + x.h + 6;
+      if (x.c.carte.classList.contains("active")) fond = x.top + x.plein + 6;
     }
     for (const x of liste) x.c.carte.style.top = x.top + "px";
-    marge.style.minHeight = bas + "px";
+    marge.style.minHeight = Math.max(bas, fond) + "px";
   }
 
   function disposer() {
@@ -1728,7 +1789,7 @@
       if (o !== x.o) { x.o = o; x.ajuste = true; }
     }
     if (!debut || !fin || (debut.f === fin.f && debut.o >= fin.o)) {
-      avis("Ce passage ne correspond à aucun texte de la source (numéro, renvoi calculé…). Utilisez « + » ou « ✎ » dans la marge.", true);
+      avis("Ce passage ne correspond à aucun texte de la source (numéro, renvoi calculé…). Utilisez la poignée « + » de la marge.", true);
       return null;
     }
     if (debut.f !== fin.f) { avis("La sélection s'étend sur deux fichiers : sélectionnez un passage plus court.", true); return null; }
@@ -1893,6 +1954,8 @@
     }
     autre(null);
     $("menu-selection").hidden = true;
+    agents.preparerDestinataire("saisie", S.saisie.pour);
+    $("saisie-pour-ligne").hidden = $("saisie-pour-ligne").hidden || S.saisie.mode === "amend";
     $("saisie").showModal();
     viser(S.saisie);
     $("saisie-texte").focus();
@@ -1926,24 +1989,37 @@
     const s = S.saisie;
     if (!s || S.envoi) return;
     if (s.envoiIncertain) { message("Un enregistrement a été tenté : vérifiez le texte avant de recommencer. Votre saisie reste dans Brouillons."); return; }
-    const texte = $("saisie-texte").value.trim();
-    if (!texte) { message("Écrivez une remarque."); return; }
+    // Le destinataire (P10.6) : « Réponse par », ou « @Nom » en tête du texte.
+    const dest = s.mode === "amend" ? { pour: "", texte: $("saisie-texte").value.trim() } : agents.destinataire("saisie", $("saisie-texte").value.trim());
+    const texte = dest.texte.trim();
+    if (!texte) { message(s.mode === "amend" ? "Le message ne peut pas être vide : retirez-le plutôt." : "Écrivez une remarque."); return; }
+    if (s.mode === "amend" && texte === s.original.trim()) { message("Le texte n'a pas changé."); return; }
     // L'empreinte est celle du texte affiché quand le passage a été choisi :
     // si le fichier a changé depuis, le serveur refuse (409) au lieu d'écrire ailleurs.
-    const req = { file: s.file, hash: s.hash, mode: s.mode, start: s.start, end: s.end, text: s.prefixe + texte };
+    const req = { file: s.file, hash: s.hash, mode: s.mode, start: s.start, end: s.end, text: s.prefixe + texte, recipient: dest.pour };
     S.envoi = true;
     S.occupe++;
     $("saisie-ok").disabled = true;
     $("saisie").querySelector(".corps").inert = true;
     const pret = await preparerBrouillon("saisie");
     const r = !pret ? { ok: false, status: 400, data: { error: "draft", message: "Brouillon non confirmé : vérifiez sa sauvegarde avant d'enregistrer." } } : s.mode === "reply"
-      ? await api("/api/reply", { file: s.file, hash: s.hash, start: s.start, text: req.text })
-      : await api("/api/comment", req);
+      ? await api("/api/reply", { file: s.file, hash: s.hash, start: s.start, text: req.text, recipient: dest.pour })
+      : s.mode === "amend"
+        ? await api("/api/amend", { file: s.file, hash: s.hash, start: s.start, text: texte })
+        : await api("/api/comment", req);
     await apresEnvoiBrouillon(s, r);
     $("saisie").querySelector(".corps").inert = false;
     $("saisie-ok").disabled = false;
     S.envoi = false;
     try {
+      if (r.ok && s.mode === "amend") {
+        S.annuler.push({ type: "modification", file: s.file, start: r.data.start, hashApres: r.data.hash, avant: s.original, apres: texte, reponse: s.reponse });
+        S.retablir = [];
+        fermerSaisie(true);
+        avis(s.reponse ? "Réponse modifiée." : "Commentaire modifié.");
+        await charger(true);
+        return;
+      }
       if (r.ok) {
         S.annuler.push({ type: s.mode === "reply" ? "reponse" : "", file: req.file, start: r.data.start, hashApres: r.data.hash, req });
         S.retablir = [];
@@ -1954,6 +2030,17 @@
       }
       const d = r.data;
       if (d.error === "turn") { message(d.message); return; }
+      if (s.mode === "amend") {
+        if (r.status === 409) {
+          // Pas de reprise dans un autre passage : le texte reste dans Brouillons.
+          fermerSaisie(false);
+          avis("Le fichier a changé sur le disque. Votre texte est conservé dans Brouillons : rouvrez « Modifier » sur la carte.", true);
+          await charger(true);
+          return;
+        }
+        message(d.message || "La modification a échoué.");
+        return;
+      }
       if (r.status === 409) {
         fermerSaisie(false);
         avis("Le fichier a changé sur le disque. Votre remarque est conservée : sélectionnez de nouveau le passage.", true);
@@ -2002,9 +2089,64 @@
     }
   }
 
+  // Vos messages (commentaire, réponse) se modifient tant qu'ils n'ont pas
+  // été remis à l'agent (P9.1) ; ensuite, on répond dans le fil. Une
+  // correction de l'agent ne se modifie pas.
+  function modifiable(m) {
+    return m.status === "new" && !m.fix && (m.by === "author" || (!m.id && !m.by));
+  }
+
+  // Le message de tête d'une discussion (le commentaire lui-même, ou la
+  // remarque d'un passage surligné), s'il est à vous et modifiable.
+  function teteModifiable(a) {
+    const m = a.messages.find((x) => !x.reply);
+    return m && modifiable(m) ? m : null;
+  }
+
+  function outilsMessage(a, m, i) {
+    const o = el("span", "msg-outils");
+    const b = (libelle, classe, action) => {
+      const x = el("button", "icone " + classe);
+      x.type = "button";
+      x.innerHTML = icone(classe); // constante de ce fichier, jamais du texte du document
+      x.setAttribute("aria-label", libelle);
+      x.dataset.infobulle = libelle;
+      x.addEventListener("click", (e) => { e.stopPropagation(); action(); });
+      o.append(x);
+    };
+    b("Modifier votre réponse", "corriger", () => modifier(a, m, i));
+    b("Retirer votre réponse", "retirer", () => retirerReponse(a, m));
+    return o;
+  }
+
+  function modifier(a, m, i) {
+    const extrait = m.reply ? court(a.kind === "comment" ? a.text : a.kind === "substitution" ? a.text + " → " + a.new : a.text, 300)
+      : a.kind === "highlight" ? court(a.text, 300) : "";
+    S.saisie = { mode: "amend", file: a.file, hash: S.hashes[a.file], start: m.start, end: m.start, extrait, prefixe: "",
+      annotationID: a.id || "", original: m.text, reponse: !!m.reply };
+    ouvrirSaisie((m.reply ? "Modifier votre réponse · annotation " : "Modifier votre commentaire · annotation ") + (i + 1), extrait, "", m.text);
+  }
+
+  async function retirerReponse(a, m) {
+    if (S.ecriture) { avis("Une écriture est en cours : réessayez dans un instant."); return; }
+    if (!(await boite({ titre: "Retirer votre réponse ?", message: "Elle disparaît du fil. Elle n'avait pas encore été remise à l'agent.",
+      icone: "retirer", ton: "danger", ok: "Retirer" }))) return;
+    S.ecriture = true;
+    S.occupe++;
+    try {
+      const r = await api("/api/withdraw", { file: a.file, hash: S.hashes[a.file], start: m.start });
+      if (!r.ok) avis(r.data.message || "Le retrait a échoué.", true); else avis("Réponse retirée.");
+      await charger(true);
+    } finally {
+      S.occupe--;
+      S.ecriture = false;
+    }
+  }
+
   function repondre(a, i) {
     const resume = a.kind === "comment" ? a.text : a.kind === "substitution" ? a.text + " → " + a.new : a.text;
-    S.saisie = { mode: "reply", file: a.file, hash: S.hashes[a.file], start: a.start, end: a.start, extrait: court(resume, 300), prefixe: "", annotationID: a.id || "" };
+    S.saisie = { mode: "reply", file: a.file, hash: S.hashes[a.file], start: a.start, end: a.start, extrait: court(resume, 300), prefixe: "", annotationID: a.id || "",
+      pour: a.to || "" }; // le fil reste adressé à son destinataire (P10.6)
     ouvrirSaisie("Répondre à l'annotation " + (i + 1), court(resume, 300), "");
   }
 
@@ -2078,7 +2220,7 @@
   function corriger(a, i) {
     const info = a.kind === "addition" ? "Texte ajouté par votre proposition." :
       "Texte qui remplacera « " + court(a.text, 120) + " »" + " ; laissez vide pour proposer de le supprimer.";
-    ouvrirEdition("Corriger la proposition " + (i + 1), info, {
+    ouvrirEdition("Modifier la proposition " + (i + 1), info, {
       mode: "revise", file: a.file, hash: S.hashes[a.file], at: a.start, start: a.textStart, end: a.textEnd,
       annotation: a.start, annotationID: a.id || "", kind: a.kind, ancien: a.kind === "addition" ? "" : a.text, original: textePropose(a),
     });
@@ -2164,34 +2306,123 @@
     if (!st) return;
     const agent = st.hand === "agent";
     document.body.classList.toggle("main-agent", agent);
-    $("bandeau-agent").hidden = !agent;
+    $("carte-tour").classList.toggle("agent", agent);
     zone.className = agent ? "agent" : "";
-    zone.append(el("strong", "", "Tour " + (st.round || st.turn) + (agent ? " · réponse de l'agent" : " · votre main")));
-    if (st.since) {
-      const d = new Date(st.since);
-      zone.dataset.infobulle = (st.reclaimed ? "Main reprise le " : "Remis par " + (st.lastActor === "agent" ? "l'agent" : "vous") + " le ") +
-        d.toLocaleString("fr-FR") + (st.note ? " : « " + st.note + " »" : "");
-      zone.append(el("small", "", (st.reclaimed ? "Main reprise " : (st.lastActor === "agent" ? "L'agent a remis son tour " : "Vous avez remis votre tour ")) +
-        quand(d) + (st.note ? " : « " + court(st.note, 90) + " »" : ".")));
-    } else {
-      zone.dataset.infobulle = "Aucun tour remis pour l'instant.";
-      zone.append(el("small", "", "Commentez et suggérez, puis remettez la main à l'agent."));
+    const tour = "Tour " + (st.round || st.turn);
+    const depuis = st.since ? new Date(st.since) : null;
+    // Ce que vous allez remettre (P9.3) : commentaires, suggestions, réponses de ce tour.
+    // Pendant le tour de l'agent : ce qu'il a écrit depuis la remise.
+    const n = st.thisTurn || {};
+    const detail = [];
+    for (const [cle, un, plusieurs] of [["comments", "commentaire", "commentaires"],
+      ["proposals", "suggestion", "suggestions"], ["replies", "réponse", "réponses"]]) {
+      if (n[cle]) detail.push(n[cle] + " " + (n[cle] > 1 ? plusieurs : un));
+    }
+    // Signe de vie de l'agent (P10.1) : qui écoute, s'il a pris la main, s'il écrit.
+    const pres = presenceAgent(st);
+    $("carte-tour").classList.toggle("absent", !pres.present);
+    let fort = tour + " · à vous";
+    if (agent) {
+      fort = !pres.present ? pres.libelle
+        : !pres.pris ? pres.nom + " va prendre la main"
+        : detail.length ? pres.nom + " travaille" + (pres.etape || "") + " · " + detail.join(", ") : pres.lance ? pres.nom + " travaille" + (pres.etape || "") : pres.nom + " a pris la main";
+    }
+    zone.append(el("strong", "", fort));
+    const petit = [];
+    if (!agent) petit.push(pres.present ? pres.nom + " attend" : pres.libelle);
+    if (depuis) petit.push((st.reclaimed ? "Reprise " : agent ? "Remise " : "Rendue ") + quand(depuis));
+    if (petit.length) {
+      const sm = el("small", "", petit.join(" · "));
+      if (!agent && !pres.present) sm.classList.add("absent");
+      zone.append(sm);
     }
     if (st.problems && st.problems.length) {
-      const b = el("span", "alerte", "⚠ " + st.problems.length);
-      b.dataset.infobulle = st.problems.join("\n");
-      zone.append(document.createTextNode(" "), b);
+      const b = el("span", "alerte");
+      b.innerHTML = icone("alerte"); // constante de ce fichier
+      b.append(String(st.problems.length));
+      zone.append(b);
     }
+    const puces = $("puces");
+    puces.textContent = "";
+    for (const [cle, ic] of [["comments", "commenter"], ["proposals", "suggerer"], ["replies", "repondre"]]) {
+      if (!n[cle]) continue;
+      const p = el("span", "puce " + cle);
+      p.innerHTML = icone(ic); // constante de ce fichier
+      p.append(el("b", "", String(n[cle])));
+      puces.append(p);
+    }
+    puces.hidden = agent || !detail.length;
     const bt = $("remettre");
     bt.hidden = false;
-    $("remettre-texte").textContent = agent ? "Reprendre la main" : "Remettre à l'agent";
-    $("remettre-icone").dataset.icone = agent ? "reprendre" : "remettre";
-    if (window.GloseIcones) GloseIcones.remplir($("remettre"));
-    bt.dataset.infobulle = agent ? "L'agent n'a pas remis son tour : reprendre la main (ses modifications deviennent des propositions)"
-      : "Remettre votre tour à l'agent, avec une note facultative";
+    const resume = detail.length ? detail.join(", ") : "aucune annotation pour l'instant";
+    bt.setAttribute("aria-label", agent ? "L'agent a la main. Reprendre la main sans attendre sa remise"
+      : tour + ", à vous. Remettre la main à l'agent : " + resume);
+    bt.dataset.infobulle = (agent ? "La main est à l'agent : vous lisez. Cliquer pour reprendre la main (ses modifications deviennent des propositions)"
+      : "Remettre la main à l'agent, avec une note facultative.\nCe tour : " + resume) +
+      "\n" + pres.infobulle +
+      (depuis ? "\n" + (st.reclaimed ? "Main reprise le " : "Remis par " + (st.lastActor === "agent" ? "l'agent" : "vous") + " le ") +
+        depuis.toLocaleString("fr-FR") + (st.note ? " : « " + court(st.note, 160) + " »" : "") : "") +
+      (st.problems && st.problems.length ? "\n" + st.problems.join("\n") : "");
+    if (S.dernierEtat !== undefined && S.dernierEtat !== st.hand) $("navette-annonce").textContent = agent ? "La main est à l'agent." : "La main vous revient.";
     if (agent && S.dernierEtat !== "agent" && S.dernierEtat !== undefined) avis("Tour remis à l'agent.");
     if (!agent && S.dernierEtat === "agent") avis("L'agent vous a remis la main" + (st.note ? " : « " + court(st.note, 120) + " »" : "."));
     S.dernierEtat = st.hand;
+    agents.maj(S.doc.agentsConfigured !== false);
+  }
+
+  // La présence de l'agent, telle que la capsule la dit (P10.1). Le serveur
+  // calcule sa fraîcheur : 60 s sans signe en attente, 30 min une fois la
+  // main prise (un agent réfléchit ou écrit sans lancer glose).
+  // Le modèle d'un agent, en bref (P10.11) : « claude-agent/opus#high » → « opus ».
+  function modeleCourt(m) { return m ? String(m).split("/").pop().split("#")[0] : ""; }
+  function presenceAgent(st) {
+    const a = st && st.agent;
+    const run = S.doc && S.doc.run;
+    const modele = a && a.model ? " · " + modeleCourt(a.model) : run && run.model ? " · " + modeleCourt(run.model) : "";
+    const nom = (a && a.name && a.name !== "agent" ? a.name : run && run.alias ? run.alias : "L'agent") + modele;
+    // Un agent lancé par Glose (P10.5) travaille tant que son processus vit,
+    // même sans lancer glose ; arrêté sans remettre, la capsule le dit.
+    if (st && st.hand === "agent" && run && run.turn === st.turn) {
+      const n = run.alias ? run.alias + (run.model ? " · " + modeleCourt(run.model) : "") : nom;
+      // Un tour à plusieurs destinataires (P10.6) : le passage en cours.
+      const ps = S.doc.passes && S.doc.passes.turn === st.turn ? S.doc.passes.passes : null;
+      const k = ps ? ps.findIndex((x) => x.state === "running") : -1;
+      const etape = ps && ps.length > 1 && k >= 0 ? " · passage " + (k + 1) + "/" + ps.length : "";
+      if (run.running) return { present: true, pris: true, nom: n, configure: true, lance: true, etape,
+        infobulle: n + " travaille (lancé par Glose)" + (ps ? " ; passages : " + ps.map((x) => x.alias + " (" + x.count + ")").join(", ") : "") + ". Menu : voir ce qu'il fait, l'arrêter." };
+      // Entre deux passages, Glose enchaîne : rien n'est arrêté.
+      if (ps && ps.some((x) => x.state === "waiting")) return { present: true, pris: true, nom: "Glose", configure: true, lance: true, etape: " · passage suivant",
+        infobulle: "Glose lance l'agent du passage suivant." };
+      // Fini : seul un signe postérieur à sa fin (un autre agent) dit qu'on travaille encore.
+      if (!a || !a.fresh || !a.taken || !run.ended || new Date(a.seen) <= new Date(run.ended)) {
+        return { present: false, pris: false, nom: n, configure: true, arrete: true, libelle: n + " s'est arrêté sans remettre",
+          infobulle: n + " s'est arrêté sans remettre la main. Menu : voir ce qu'il a fait, le relancer ; ou reprenez la main." };
+      }
+    }
+    // Pendant votre tour, seul un agent qui attend (glose wait, ou lié à
+    // l'instant) écoute : après « done », il peut être parti.
+    if (!a || !a.fresh || (st.hand !== "agent" && !a.listening)) {
+      // Une session liée qui ne relance pas sa commande (P10.12) : elle est
+      // liée, mais personne n'attend la remise.
+      const lien = S.doc && S.doc.link;
+      if (a && a.link && lien && lien.used === a.name && lien.code.replace(/-/g, "") === a.link) {
+        return { present: false, pris: false, nom, configure: true, lie: true,
+          libelle: nom + (st.hand === "agent" ? " (lié) n'a pas pris la main" : " est lié mais n'attend pas"),
+          infobulle: nom + " est lié, mais n'attend plus (dernier signe " + quand(new Date(a.seen)) + ") : dans sa session, faites-lui relancer " +
+            "« glose join " + lien.code + " --agent \"" + a.name + "\" », ou reprenez la main." };
+      }
+      // Tant que glose set n'a pas été fait, Glose le dit et y mène (P10.3).
+      const configure = !S.doc || S.doc.agentsConfigured !== false;
+      return { present: false, pris: false, nom, configure,
+        libelle: configure ? "Aucun agent à l'écoute" : "Aucun agent configuré",
+        infobulle: (configure ? "Aucun agent à l'écoute" : "Aucun agent configuré (glose set)") +
+          (a ? " (dernier signe de " + nom + " " + quand(new Date(a.seen)) + ")" : "") +
+          " : lancez ou liez un agent (menu de la capsule), ou reprenez la main." };
+    }
+    const pris = st.hand === "agent" && a.taken;
+    return { present: true, pris, nom, configure: true,
+      infobulle: nom + (pris ? " a pris la main" : st.hand === "agent" ? " va prendre la main" : " attend votre remise") +
+        " (dernier signe " + quand(new Date(a.seen)) + ")." };
   }
 
   function ouvrirRemise() {
@@ -2205,6 +2436,14 @@
       ? "L'agent n'a pas remis son tour. Ses modifications des fichiers seront converties en propositions, comme par « glose done », puis la main vous reviendra."
       : (nouv > 1 ? nouv + " annotations de ce tour seront remises. " : nouv === 1 ? "L'annotation de ce tour sera remise. " : "") +
         "L'agent pourra répondre et proposer ; vous ne pourrez plus écrire jusqu'à sa remise, sauf à reprendre la main.";
+    const pres = presenceAgent(st);
+    const alerte = $("remise-alerte");
+    alerte.hidden = agent || pres.present;
+    alerte.textContent = (pres.configure ? "Aucun agent n'est à l'écoute" : "Aucun agent configuré, et aucun n'est à l'écoute") +
+      " : la main restera à l'agent jusqu'à ce qu'un agent la prenne. Vous pourrez la reprendre.";
+    if (!pres.configure) alerte.append(" ", agents.boutonConfigurer());
+    if (agent) $("remise-lancement").hidden = true; else agents.preparerRemise(pres.present);
+    if (!agent && $("remise-lancer").checked && !$("remise-lancement").hidden) alerte.hidden = true;
     $("remise-note").value = "";
     $("remise-message").textContent = "";
     $("remise-force").hidden = true;
@@ -2218,7 +2457,9 @@
     S.envoi = true;
     S.occupe++;
     $("remise-ok").disabled = true;
-    const r = await api(S.remise.reprise ? "/api/reclaim" : "/api/handoff", { note: $("remise-note").value.trim(), force: !!force });
+    const corps = { note: $("remise-note").value.trim(), force: !!force };
+    if (!S.remise.reprise) corps.launch = agents.choixLancement();
+    const r = await api(S.remise.reprise ? "/api/reclaim" : "/api/handoff", corps);
     $("remise-ok").disabled = false;
     S.envoi = false;
     try {
@@ -2227,9 +2468,11 @@
         const d = r.data;
         let m = S.remise.reprise ? "Vous avez repris la main." : "Tour remis à l'agent.";
         if (d.converted) m += " " + d.converted + " proposition" + (d.converted > 1 ? "s" : "") + " tirée" + (d.converted > 1 ? "s" : "") + " des modifications de l'agent.";
+        if (!S.remise.reprise && d.run && d.run.running) m += " " + d.run.alias + " est lancé.";
+        if (d.launchError) m += " Agent non lancé : " + d.launchError;
         S.annuler = []; S.retablir = []; majBoutons();
         S.dernierEtat = undefined;
-        avis(m);
+        avis(m, !!d.launchError);
         await charger(true);
         return;
       }
@@ -2356,6 +2599,8 @@
     $("edition-tenant").checked = recupere ? recupere.whole : localStorage.getItem("glose-tenant") === "1";
     $("edition-tenant-case").hidden = contexte.mode === "revise";
     $("menu-selection").hidden = true;
+    agents.preparerDestinataire("edition");
+    $("edition-pour-ligne").hidden = $("edition-pour-ligne").hidden || contexte.mode === "revise";
     $("edition").showModal();
     if (prefere !== "mef" || !modeEdition("mef", true)) modeEdition("source", true);
     $("edition-changements").textContent = "";
@@ -2656,10 +2901,11 @@
     if (texte === x.original) { $("edition-message").textContent = "Aucune modification."; return; }
     const correction = x.mode === "revise";
     $("edition-message").className = "";
+    const dest = correction ? { pour: "", texte: $("edition-note").value.trim() } : agents.destinataire("edition", $("edition-note").value.trim());
     const req = correction
       ? { file: x.file, hash: x.hash, start: x.annotation, text: texte, note: $("edition-note").value.trim() }
       : { file: x.file, hash: x.hash, mode: x.mode, at: x.at, to: x.to || 0, where: x.where || "", tight: !!x.tight,
-        start: x.start, end: x.end, text: texte, note: $("edition-note").value.trim(), whole: $("edition-tenant").checked };
+        start: x.start, end: x.end, text: texte, note: dest.texte.trim(), whole: $("edition-tenant").checked, recipient: dest.pour };
     S.envoi = true;
     S.occupe++;
     $("edition-ok").disabled = true;
@@ -2679,7 +2925,7 @@
         S.retablir = [];
         S.edition = null;
         $("edition").close();
-        avis(correction ? "Proposition corrigée." + (req.note ? " Votre message est dans son fil." : "")
+        avis(correction ? "Proposition modifiée." + (req.note ? " Votre message est dans son fil." : "")
           : req.note ? "Proposition enregistrée, avec votre message." : "Modifications enregistrées comme propositions.");
         await charger(true);
         return;
@@ -2767,17 +3013,20 @@
         ? await api("/api/decide", { file: x.file, hash: x.hashApres, start: x.start, end: x.end, decision: "reject" })
         : x.type === "correction"
           ? await api("/api/revise", { file: x.file, hash: x.hashApres, start: x.start, text: x.avant, note: "" })
-          : await api("/api/withdraw", { file: x.file, hash: x.hashApres, start: x.start });
+          : x.type === "modification"
+            ? await api("/api/amend", { file: x.file, hash: x.hashApres, start: x.start, text: x.avant })
+            : await api("/api/withdraw", { file: x.file, hash: x.hashApres, start: x.start });
       if (r.ok) {
-        if (x.type === "correction" || x.type === "decision") x.hashAvant = r.data.hash;
+        if (x.type === "correction" || x.type === "decision" || x.type === "modification") x.hashAvant = r.data.hash;
         S.retablir.push(x);
         avis(x.type === "decision" ? "Décision annulée : la proposition ou la discussion est de retour." :
-          x.type === "edition" ? "Modification annulée." : x.type === "correction" ? "Correction annulée." :
+          x.type === "edition" ? "Modification annulée." : x.type === "correction" ? "Modification de la proposition annulée." :
+          x.type === "modification" ? (x.reponse ? "Modification de la réponse annulée." : "Modification du commentaire annulée.") :
           x.type === "reponse" ? "Réponse annulée." : "Commentaire annulé.");
       } else if (r.status === 0) {
         S.annuler.push(x); // erreur passagère : on pourra réessayer
         avis("Impossible d'annuler : " + r.data.message, true);
-      } else if (x.type === "correction" || x.type === "decision") {
+      } else if (x.type === "correction" || x.type === "decision" || x.type === "modification") {
         avis("Impossible d'annuler : " + (r.data.message || "le fichier a changé depuis."), true);
       } else {
         avis("Impossible d'annuler : le fichier a changé depuis ce commentaire. Retirez-le depuis sa carte.", true);
@@ -2805,17 +3054,20 @@
         ? await api("/api/reply", { file: x.req.file, hash: x.req.hash, start: x.req.start, text: x.req.text })
         : x.type === "correction"
           ? await api("/api/revise", { file: x.file, hash: x.hashAvant, start: x.start, text: x.apres, note: "" })
-          : await api(x.type === "edition" ? "/api/edit" : "/api/comment", x.req);
+          : x.type === "modification"
+            ? await api("/api/amend", { file: x.file, hash: x.hashAvant, start: x.start, text: x.apres })
+            : await api(x.type === "edition" ? "/api/edit" : "/api/comment", x.req);
       if (r.ok) {
-        S.annuler.push(x.type === "correction" || x.type === "decision" ? Object.assign({}, x, { start: x.type === "decision" ? x.start : r.data.start, hashApres: r.data.hash })
+        S.annuler.push(x.type === "correction" || x.type === "decision" || x.type === "modification" ? Object.assign({}, x, { start: x.type === "decision" ? x.start : r.data.start, hashApres: r.data.hash })
           : { type: x.type, file: x.file, start: r.data.start, end: r.data.end, hashApres: r.data.hash, req: x.req });
         avis(x.type === "decision" ? "Décision rétablie." : x.type === "edition" ? "Modification rétablie." :
-          x.type === "correction" ? "Correction rétablie." : "Commentaire rétabli.");
+          x.type === "correction" ? "Modification de la proposition rétablie." :
+          x.type === "modification" ? (x.reponse ? "Modification de la réponse rétablie." : "Modification du commentaire rétablie.") : "Commentaire rétabli.");
       } else if (r.status === 0) {
         S.retablir.push(x);
         avis("Impossible de rétablir : " + r.data.message, true);
-      } else if (x.type === "edition" || x.type === "correction" || x.type === "decision") {
-        avis("Impossible de rétablir : le fichier a changé depuis.", true);
+      } else if (x.type === "edition" || x.type === "correction" || x.type === "decision" || x.type === "modification") {
+        avis("Impossible de rétablir : " + (r.data.message || "le fichier a changé depuis."), true);
       } else {
         S.brouillonOrphelin = { texte: x.req.text, file: x.req.file, extrait: "" };
         avis("Impossible de rétablir : le fichier a changé. Le texte de la remarque est conservé : sélectionnez de nouveau le passage.", true);
@@ -2841,6 +3093,20 @@
     // Un fichier apparu ou disparu (chapitre créé par l'agent, profil modifié) change aussi la liste.
     const change = r.data.filesGen !== S.doc.filesGen || r.data.files.length !== S.doc.files.length ||
       r.data.files.some((f) => S.hashes[f.index] !== f.hash) || r.data.seq !== S.doc.seq;
+    // La présence de l'agent change sans que rien d'autre change (P10.1).
+    const cle = (o) => JSON.stringify([o.agent || null, o.agentsConfigured, o.textAgent || null, o.textRequires || [], o.run || null, o.passes || null, o.aliases || [], o.link || null, o.owner || null]);
+    if (S.doc.state && cle({ ...r.data }) !== cle({ ...S.doc, agent: S.doc.state.agent })) {
+      S.doc.state.agent = r.data.agent || null;
+      S.doc.agentsConfigured = r.data.agentsConfigured;
+      S.doc.textAgent = r.data.textAgent || null;
+      S.doc.textRequires = r.data.textRequires || [];
+      S.doc.run = r.data.run || null;
+      S.doc.passes = r.data.passes || null;
+      S.doc.aliases = r.data.aliases || [];
+      S.doc.link = r.data.link || null;
+      S.doc.owner = r.data.owner || null;
+      if (!change) majNavette();
+    }
     if (!change) { S.echecs = 0; return; }
     const main = S.doc.state && S.doc.state.hand;
     if (await charger(true)) {
@@ -3034,10 +3300,15 @@
       if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); if (!e.repeat) enregistrer(); }
     });
     $("remettre").addEventListener("click", ouvrirRemise);
-    $("bandeau-reprendre").addEventListener("click", ouvrirRemise);
     $("remise").querySelector("form").addEventListener("submit", (e) => { e.preventDefault(); remettre(false); });
     $("remise-force").addEventListener("click", () => remettre(true));
     $("remise-fermer").addEventListener("click", () => { S.remise = null; $("remise").close(); });
+    $("remise-lier").addEventListener("click", () => { S.remise = null; $("remise").close(); agents.ouvrirLien(); });
+    // Lancer l'agent tient lieu d'agent à l'écoute : l'avertissement suit la case.
+    $("remise-lancer").addEventListener("change", () => {
+      const pres = presenceAgent(S.doc && S.doc.state);
+      $("remise-alerte").hidden = pres.present || $("remise-lancer").checked;
+    });
     $("remise-note").addEventListener("keydown", (e) => {
       if (compose(e)) return;
       if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); if (!e.repeat) remettre(false); }
@@ -3060,19 +3331,17 @@
     });
     choisirOnglet(localStorage.getItem("glose-onglet") || "sommaire");
     brancherColonne();
-    $("bouton-sommaire").addEventListener("click", () => {
-      const c = document.getElementById("cote");
-      c.hidden = !c.hidden;
-      document.getElementById("app").classList.toggle("sans-colonne", c.hidden);
-      appliquerGrille();
-      $("bouton-sommaire").setAttribute("aria-expanded", String(!c.hidden));
-      disposer();
-    });
+    $("bouton-sommaire").addEventListener("click", () => montrerColonne(false));
+    $("rail-ouvrir").addEventListener("click", () => montrerColonne(true));
+    for (const b of $("rail").querySelectorAll("[data-rail]")) {
+      b.addEventListener("click", () => { montrerColonne(true); choisirOnglet(b.dataset.rail, true); });
+    }
+    if (localStorage.getItem("glose-colonne-masquee") === "1") montrerColonne(false, true);
     document.addEventListener("keydown", (e) => {
       if (compose(e)) return;
       // Jamais pendant une saisie : champ, éditeur, panneau ou boîte ouverts.
       const actif = document.activeElement || document.body;
-      if (document.getElementById("archive").open || document.getElementById("recherche").open || $("boite").open || $("brouillons").open || $("saisie").open || $("edition").open || $("remise").open || !$("reglages").hidden ||
+      if (document.getElementById("archive").open || !document.getElementById("recherche").hidden || $("boite").open || $("brouillons").open || $("saisie").open || $("edition").open || $("remise").open || !$("reglages").hidden || agents.ouvert() ||
         /^(TEXTAREA|INPUT|SELECT)$/.test(actif.tagName) || actif.isContentEditable) return;
       const k = e.key.toLowerCase();
       if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey && k === "f") { e.preventDefault(); recherche.montrer(); return; }
@@ -3094,11 +3363,24 @@
       // Alt+chiffre donne un autre caractère sur certains claviers).
       else if (e.altKey && !e.ctrlKey && !e.metaKey && /^Digit[1-4]$/.test(e.code)) {
         e.preventDefault();
+        montrerColonne(true, true);
         choisirOnglet(["sommaire", "fichiers", "annotations", "navette"][+e.code.slice(5) - 1], true);
       }
+      else if (e.altKey && !e.ctrlKey && !e.metaKey && e.code === "Digit0") { e.preventDefault(); montrerColonne($("cote").hidden); }
     });
     new ResizeObserver(disposer).observe($("texte"));
+    // Un fichier tout juste affiché n'a d'abord qu'une hauteur estimée
+    // (content-visibility) : Firefox ne le met en page qu'à l'image suivante,
+    // après le placement des cartes. La hauteur du texte peut alors retrouver
+    // sa valeur d'avant, sans que le ResizeObserver ne voie rien : les cartes
+    // restaient décalées jusqu'au rechargement. L'événement ne remonte pas,
+    // d'où la capture.
+    $("texte").addEventListener("contentvisibilityautostatechange", disposer, true);
     window.addEventListener("resize", () => { fermerOutils(); disposer(); });
+    // Une ombre sous la barre du haut, une fois le texte défilé (P9.2).
+    const defile = () => document.body.classList.toggle("defile", window.scrollY > 2);
+    window.addEventListener("scroll", defile, { passive: true });
+    defile();
     if (S.jeton) chargerReglages();
     setInterval(surveiller, 2000);
   }

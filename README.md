@@ -53,9 +53,11 @@ glose stop                  # stops the server
 
 ### In the browser
 
+A sticky top bar holds the title, the hand-over capsule (who has the hand, the round, what you are about to hand over; a click hands over or takes the hand back), then, on the right, the three views, undo, redo and display settings, and the search field.
+
 Select a passage, then **Commenter** (comment, `C`) or **Suggérer** (suggest, `S`); the handle in the left margin acts on a whole paragraph. Each annotation is written to the file at once, as CriticMarkup, with its own identifier. The cards in the margin show the thread (author and agent) and the decisions: accept, reject, resolve, or accept everything in a file. Undo and redo (`Ctrl+Z`, `Ctrl+Y`) apply to your latest actions.
 
-Keyboard: `J` and `K` move between annotations; on the active card, `A` accepts, `X` rejects, `R` replies, `E` edits your own suggestion; `1`, `2`, `3` switch views (changes, current text, proposed text). The left column has four tabs (`Alt+1` to `Alt+4`): table of contents (with review progress), files (choose the part displayed), annotations (with filters), and the timeline of turns.
+Keyboard: `J` and `K` move between annotations; on the active card, `A` accepts, `X` rejects, `R` replies, `E` edits your own suggestion; `1`, `2`, `3` switch views (changes, current text, proposed text). The left column has four tabs (`Alt+1` to `Alt+4`): table of contents (with review progress), files (choose the part displayed), annotations (with filters), and the timeline of turns; `Alt+0` folds the column away.
 
 **Search** (`Ctrl+Shift+F`) looks through every file, even those not displayed, in the current or the proposed text. Markdown links between chapters open the target part. Archived discussions can be read again from the timeline: suggestion, decision and the whole thread.
 
@@ -72,7 +74,9 @@ glose propose --file a.md --find "text" --new "other text" --note "…"   # sugg
 glose done --note "…"       # hands the turn back; free edits become suggestions
 ```
 
-The author accepts or rejects; the review ends when no annotation is left. The agent never decides. If the agent does not hand its turn back, the author can take it back from the banner.
+The author accepts or rejects; the review ends when no annotation is left. The agent never decides. If the agent does not hand its turn back, the author can take it back from the top bar.
+
+**Agents.** `glose set` opens the agent settings (shared by all projects): installed agents (Claude Code, Codex, OpenCode), short names for an agent + model pair, and the default one; no key is stored, each agent keeps its own login and tools. Glose can then launch the agent when the author hands over (non-interactive, in the project directory, with reduced permissions, one at a time, with a time limit; its output is kept and it can be stopped). An agent session already open elsewhere can be bound to Glose with a short code (`glose join CODE`). Each annotation may name the agent that must answer (`@Name`, or « Réponse par »): Glose then runs one pass per agent, in sequence, and hands the turn back itself; every reply is signed with the agent's name.
 
 ### Projects
 

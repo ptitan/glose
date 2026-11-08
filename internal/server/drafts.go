@@ -154,7 +154,7 @@ func (s *Server) setDraft(w http.ResponseWriter, r *http.Request) {
 	}
 	if d := req.Draft; d != nil {
 		_, clean, err := c.P.Inside(d.Path)
-		validKind := d.Kind == "comment" || d.Kind == "reply" || d.Kind == "edit"
+		validKind := d.Kind == "comment" || d.Kind == "reply" || d.Kind == "amend" || d.Kind == "edit"
 		if err != nil || clean != d.Path || !validKind || len(d.Hash) != 64 || d.Start < 0 || d.End < d.Start ||
 			d.At < 0 || d.To < 0 || d.Annotation < 0 || len(d.Path) > 4096 {
 			jsonError(w, http.StatusBadRequest, "draft", "cible du brouillon invalide")

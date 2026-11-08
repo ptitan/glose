@@ -11,7 +11,9 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 // ProfileName is the name of the profile at the root of a project.
@@ -37,20 +39,57 @@ type Profile struct {
 	// (no numbering across files): the HTML is then made and kept file by
 	// file (P6.5). Without a filter, it always is.
 	FilterPerFile bool `json:"filterPerFile"`
+	// Agent is what this text asks of the agent (D-48): its short name,
+	// instructions of its own, and the tools it requires. Never a path nor
+	// a key: the repository may be public.
+	Agent *AgentProfile `json:"agent"`
+}
+
+// AgentProfile is the key « agent » of glose.json.
+type AgentProfile struct {
+	// Alias is a short name of the general configuration (glose set).
+	Alias string `json:"alias"`
+	// Instructions are given to the agent with the rules of the navette.
+	Instructions string `json:"instructions"`
+	// Requires are the tools the agent must declare: « mcp:NAME » or
+	// « skill:NAME ».
+	Requires []string `json:"requires"`
+}
+
+var (
+	aliasRe   = regexp.MustCompile(`^[A-Za-z0-9._-]{1,32}$`)
+	requireRe = regexp.MustCompile(`^(mcp|skill):[A-Za-z0-9._-]{1,64}$`)
+)
+
+// check validates the key « agent » of the profile.
+func (a *AgentProfile) check() error {
+	if a.Alias != "" && !aliasRe.MatchString(a.Alias) {
+		return fmt.Errorf("agent.alias %q : 1 à 32 lettres sans accent, chiffres, « . », « _ » ou « - »", a.Alias)
+	}
+	if !utf8.ValidString(a.Instructions) || utf8.RuneCountInString(a.Instructions) > 4000 {
+		return errors.New("agent.instructions : 4 000 caractères au plus")
+	}
+	for _, r := range a.Requires {
+		if !requireRe.MatchString(r) {
+			return fmt.Errorf("agent.requires %q : « mcp:NOM » ou « skill:NOM » attendu (NOM : lettres, chiffres, « . », « _ », « - »)", r)
+		}
+	}
+	return nil
 }
 
 // Project is a reviewed project, with every path checked and resolved.
 type Project struct {
-	Root      string   // absolute path of the project directory
-	Source    string   // absolute path given to Load: the directory, or a single file
-	Title     string   // title shown in the interface
-	Files     []string // Markdown files, relative to Root, slash-separated, in order
-	Filter    string   // absolute path of the Lua filter, or ""
-	CSS       string   // absolute path of the project stylesheet, or ""
-	Resources []string // absolute paths of the directories whose images are served
-	Pandoc    string   // pandoc program ("pandoc" by default)
-	PerFile   bool     // HTML made file by file: no filter, or filterPerFile
-	Profiled  bool     // true if glose.json exists
+	Root      string       // absolute path of the project directory
+	Source    string       // absolute path given to Load: the directory, or a single file
+	Title     string       // title shown in the interface
+	Files     []string     // Markdown files, relative to Root, slash-separated, in order
+	Filter    string       // absolute path of the Lua filter, or ""
+	CSS       string       // absolute path of the project stylesheet, or ""
+	Resources []string     // absolute paths of the directories whose images are served
+	Pandoc    string       // pandoc program ("pandoc" by default)
+	PerFile   bool         // HTML made file by file: no filter, or filterPerFile
+	Profiled  bool         // true if glose.json exists
+	Agent     AgentProfile // key « agent » of the profile (P10.3)
 	// Focus is the part of the project asked for when a path inside it was
 	// given (« livre-1/ » or « livre-1/01.md »), or "" (D-35): the navette
 	// covers the whole project; the interface and « glose list » start there.
@@ -161,6 +200,12 @@ func load(root, single string) (*Project, error) {
 	}
 	if prof.Title != "" {
 		p.Title = prof.Title
+	}
+	if prof.Agent != nil {
+		if err := prof.Agent.check(); err != nil {
+			return nil, fmt.Errorf("%s : %w", ProfileName, err)
+		}
+		p.Agent = *prof.Agent
 	}
 	if prof.Pandoc != "" {
 		p.Pandoc = prof.Pandoc

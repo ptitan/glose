@@ -46,6 +46,19 @@ profil : les fichiers de la racine, puis chaque sous-dossier, à trier.
   resources  dossiers dont les images peuvent être affichées (par défaut :
              tout le projet)
   pandoc     programme pandoc à utiliser (par défaut : pandoc)
+  agent      ce que ce texte demande à l'agent (lot P10), par exemple :
+               "agent": {
+                 "alias": "Sol",
+                 "instructions": "Vérifie chaque référence avec LexHarness.",
+                 "requires": ["mcp:lexharness", "skill:juriste-fr"]
+               }
+             alias : un nom court des réglages généraux (glose set) ;
+             inconnu sur la machine, le nom court par défaut est pris ;
+             instructions : consignes propres au texte, données à l'agent
+             avec celles de la navette (4 000 caractères au plus) ;
+             requires : outils que l'agent doit déclarer, « mcp:NOM » ou
+             « skill:NOM ». Jamais de chemin ni de clé : le dépôt peut être
+             public ; l'agent garde sa propre configuration.
 
 Les entrées de « files » et de « exclude »
 
