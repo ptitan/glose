@@ -1,7 +1,7 @@
 "use strict";
-// Recherche dans tout le projet (P7.3), depuis le champ de la barre du haut
-// (P9.2) : les résultats s'affichent dans une liste déroulante sous le champ.
-// Clavier : ↓ et ↑ parcourent les résultats, Entrée ouvre, Échap ferme.
+// Project-wide search (P7.3), from the field in the top bar
+// (P9.2): results appear in a dropdown below the field.
+// Keyboard: ↓ and ↑ browse results, Enter opens, Escape closes.
 window.GloseRecherche = (() => {
   function creer({ api, courant, ouvrir, avis }) {
     const d = document.getElementById('recherche');
@@ -13,13 +13,13 @@ window.GloseRecherche = (() => {
     let generation = 0, timer;
     const el = (tag, text) => { const n = document.createElement(tag); n.textContent = text; return n; };
     const resultats = () => [...liste.querySelectorAll('.resultat-recherche')];
-    // Un bloc masquable, pas un <dialog> : show() donnerait le focus à la
-    // première case du déroulant, et la saisie quitterait le champ.
+    // A hideable block, not a <dialog>: show() would focus the
+    // first box in the dropdown, taking input away from the field.
     function deplier() {
       d.hidden = false;
       input.setAttribute('aria-expanded', 'true');
     }
-    // Le focus rendu au champ ne doit pas rouvrir la liste (écouteur « focus »).
+    // Returning focus to the field must not reopen the list ("focus" listener).
     let retour = false;
     function replier(rendreFocus) {
       generation++; clearTimeout(timer);
@@ -72,7 +72,7 @@ window.GloseRecherche = (() => {
       else if (e.key === 'ArrowUp' && i >= 0) { e.preventDefault(); if (i === 0) input.focus(); else r[i - 1].focus(); }
     });
     casse.addEventListener('change', chercher);
-    // Un clic ailleurs replie la liste.
+    // Clicking elsewhere collapses the list.
     document.addEventListener('pointerdown', (e) => { if (!d.hidden && !ancre.contains(e.target)) replier(false); });
     function montrer() { deplier(); input.focus(); input.select(); chercher(); }
     return { montrer, replier };

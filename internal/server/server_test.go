@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ptitan/glose/internal/critic"
 	"github.com/ptitan/glose/internal/project"
@@ -854,6 +855,60 @@ func TestInsertAnElement(t *testing.T) {
 		if w.Code != http.StatusOK || noMeta(string(got)) != c.want {
 			t.Errorf("%q %s : %d %s\n%q\nattendu\n%q", c.src, c.where, w.Code, w.Body.String(), noMeta(string(got)), c.want)
 		}
+	}
+}
+
+// The headings of the files displayed are kept with the progress, for the
+// overview of the projects (P11.3): merged file by file, a file outside the
+// project left out, and without effect on the marks of the sections.
+func TestProgressHeadings(t *testing.T) {
+	s, dir := newServer(t, map[string]string{"a.md": "# Titre\n\nTexte.\n", "b.md": "# Autre\n"})
+	path := filepath.Join(dir, ".glose", "progression.json")
+	before, _ := os.ReadFile(filepath.Join(dir, "a.md"))
+	do(t, s, "POST", "/api/progress", map[string]any{"key": "a.md#gl-titre", "title": "Titre", "status": "relue"})
+	if w := do(t, s, "POST", "/api/progress", map[string]any{"headings": map[string]any{"a.md": []string{"gl-titre", "gl-suite"}}}); w.Code != http.StatusOK {
+		t.Fatalf("%d %s", w.Code, w.Body)
+	}
+	if w := do(t, s, "POST", "/api/progress", map[string]any{"headings": map[string]any{"b.md": []string{}}}); w.Code != http.StatusOK {
+		t.Fatalf("%d %s", w.Code, w.Body)
+	}
+	var pr Progress
+	json.Unmarshal(do(t, s, "GET", "/api/progress", nil).Body.Bytes(), &pr)
+	if len(pr.Headings["a.md"]) != 2 || pr.Headings["b.md"] == nil || pr.Sections["a.md#gl-titre"].Status != "relue" {
+		t.Fatalf("%+v", pr)
+	}
+	// Unchanged headings write nothing.
+	saved, _ := os.ReadFile(path)
+	os.Chtimes(path, time.Unix(1000, 0), time.Unix(1000, 0))
+	do(t, s, "POST", "/api/progress", map[string]any{"headings": map[string]any{"a.md": []string{"gl-titre", "gl-suite"}}})
+	if fi, _ := os.Stat(path); fi.ModTime().Unix() != 1000 {
+		t.Fatal("réécrit sans changement")
+	}
+	// A file outside the project is left out, without stopping the others.
+	if w := do(t, s, "POST", "/api/progress", map[string]any{"headings": map[string]any{"../dehors.md": []string{"x"}, "b.md": []string{"gl-autre"}}}); w.Code != http.StatusOK {
+		t.Fatalf("%d %s", w.Code, w.Body)
+	}
+	pr = Progress{}
+	json.Unmarshal(do(t, s, "GET", "/api/progress", nil).Body.Bytes(), &pr)
+	if _, ok := pr.Headings["../dehors.md"]; ok || len(pr.Headings["b.md"]) != 1 {
+		t.Fatalf("%+v", pr)
+	}
+	saved, _ = os.ReadFile(path)
+	if w := do(t, s, "POST", "/api/progress", map[string]any{"headings": map[string]any{"a.md": []string{strings.Repeat("x", 1001)}}}); w.Code != http.StatusBadRequest {
+		t.Fatalf("%d", w.Code)
+	}
+	if got, _ := os.ReadFile(path); !bytes.Equal(got, saved) {
+		t.Fatalf("modifié par un refus : %s", got)
+	}
+	// Marking a section keeps the headings.
+	do(t, s, "POST", "/api/progress", map[string]any{"key": "b.md#gl-autre", "title": "Autre", "status": "en-cours"})
+	pr = Progress{}
+	json.Unmarshal(do(t, s, "GET", "/api/progress", nil).Body.Bytes(), &pr)
+	if len(pr.Headings["b.md"]) != 1 {
+		t.Fatalf("%+v", pr)
+	}
+	if after, _ := os.ReadFile(filepath.Join(dir, "a.md")); !bytes.Equal(after, before) {
+		t.Fatal("texte touché")
 	}
 }
 

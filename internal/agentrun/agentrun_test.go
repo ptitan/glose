@@ -150,3 +150,11 @@ func TestTailKeepsTheEnd(t *testing.T) {
 		t.Fatal(tl.String())
 	}
 }
+
+// The launched agent is told that its permissions admit one command at a time
+// (seen on 8 November 2026: a composed command refused, a step wasted).
+func TestTurnPromptSaysOneCommandAtATime(t *testing.T) {
+	if p := TurnPrompt("Sol", "/racine", "", nil); !strings.Contains(p, "sans l'enchaîner") {
+		t.Fatalf("consigne : %s", p)
+	}
+}

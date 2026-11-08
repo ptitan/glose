@@ -447,12 +447,12 @@ const scenarios = [
     const src = (await p.read()).toString();
     assert.match(src, /\{>>Pour Luna\.<<\}\{>>glose:v1 id=\w+ by=author to=Luna<<\}/, '@Nom retiré, to=Luna écrit');
     assert.doesNotMatch(src, /Pour le défaut\.<<\}\{>>glose:v1 id=\w+ by=author to=/);
-    assert.ok(await page.evaluate(() => [...document.querySelectorAll('#marge .carte .pour')].map((e) => e.textContent).join() === '→ Luna'), 'destinataire sur la carte');
+    assert.ok(await page.evaluate(() => [...document.querySelectorAll('#marge .carte .pour')].map((e) => e.textContent).join() === 'Luna' && document.querySelector('#marge .carte .pour svg') !== null), 'destinataire sur la carte');
     await page.click('#remettre'); await page.wait('remise ouverte', () => document.getElementById('remise').open); await page.click('#remise-ok');
     await page.wait('main rendue après les deux passages', () => !document.body.classList.contains('main-agent')); await waitCards(page, 4);
     const fin = (await p.read()).toString();
     assert.ok(fin.indexOf('Réponse de Sol.') > 0 && fin.indexOf('Réponse de Luna.') > 0 && /via=Sol/.test(fin) && /via=Luna/.test(fin), 'deux passages signés');
-    assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('#marge .carte .msg .qui')].map((e) => e.textContent).filter((t) => /^(Sol|Luna)/.test(t)).sort()), ['Luna · y', 'Sol'], 'signatures sur les cartes, avec le modèle');
+    assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('#marge .carte > .meta .qui, #marge .carte .msg .qui')].map((e) => e.textContent).filter((t) => /^(Sol|Luna)/.test(t)).sort()), ['Luna · y', 'Sol'], 'signatures sur les cartes, avec le modèle');
     const log = JSON.parse(p.cli('log', '--json'));
     assert.match(log.turns.at(-1).note || log.turns.at(-2).note, /Sol : fait par Sol[^]*Luna : fait par Luna/);
   }],
@@ -467,7 +467,9 @@ const scenarios = [
     await page.wait('repliée', () => document.querySelector('#marge .carte.longue') !== null);
     const avant = await mesure();
     const iLong = avant.findIndex((c) => c.texte.includes('Ligne 30')), iCourt = avant.findIndex((c) => c.texte.includes('Courte.'));
-    assert.ok(avant[iLong].longue && avant[iLong].h <= 172 && !avant[iCourt].longue, 'longue repliée : ' + JSON.stringify(avant));
+    // Repliée, ses actions restent visibles, au-dessus du fondu.
+    assert.ok(await page.evaluate(() => { const c = document.querySelector('#marge .carte.longue'), o = c.querySelector('.outils button'); const r = o.getBoundingClientRect(), b = c.getBoundingClientRect(); return r.bottom <= b.bottom && r.height > 0 && document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)?.closest('.outils'); }), 'actions d’une carte repliée à portée de clic');
+    assert.ok(avant[iLong].longue && avant[iLong].h <= 220 && !avant[iCourt].longue, 'longue repliée : ' + JSON.stringify(avant));
     // Le texte entier reste dans le document (lecteurs d'écran).
     assert.ok(avant[iLong].texte.includes('Ligne 30'));
     assert.ok(avant[iCourt].top >= avant[iLong].top + avant[iLong].h, 'cartes empilées');
@@ -486,11 +488,392 @@ const scenarios = [
     assert.notEqual(dessus, 'dessous');
     // Une autre carte choisie : la longue se replie.
     await page.evaluate((j) => document.querySelectorAll('#marge .carte')[j].click(), iCourt);
-    await page.wait('repliée de nouveau', (i) => document.querySelectorAll('#marge .carte')[i].offsetHeight <= 172, iLong);
+    await page.wait('repliée de nouveau', (i) => document.querySelectorAll('#marge .carte')[i].offsetHeight <= 220, iLong);
     // Le focus clavier qui entre dans la carte longue la déplie.
     await page.evaluate((i) => document.querySelectorAll('#marge .carte')[i].focus(), iLong);
     await page.wait('dépliée au focus', (i) => document.querySelectorAll('#marge .carte')[i].classList.contains('active') &&
       document.querySelectorAll('#marge .carte')[i].offsetHeight > 200, iLong);
+  }],
+  ['carte longue : repliée dès que le focus la quitte, lecture gardée au clic', async ({ p, page }) => {
+    await p.stop();
+    await p.write('# Titre\n\n' + 'Un paragraphe ordinaire pour remplir la page assez longtemps.\n\n'.repeat(6) +
+      'Voici le mot important du texte.\n\nEt une autre phrase ordinaire ensuite.\n\n' + 'Encore un paragraphe ordinaire pour la suite de la page.\n\n'.repeat(40));
+    await p.start();
+    await page.send('Emulation.setDeviceMetricsOverride', { width: 1366, height: 768, deviceScaleFactor: 1, mobile: false });
+    await page.navigate(p.state.url);
+    const long = Array.from({ length: 60 }, (_, i) => 'Ligne ' + (i + 1) + ' d’une très longue remarque.').join(' ');
+    await openComment(page, 'mot important'); await page.fill('#saisie-texte', long); await page.click('#saisie-ok'); await waitCards(page, 1);
+    await openComment(page, 'autre phrase'); await page.fill('#saisie-texte', 'Courte.'); await page.click('#saisie-ok'); await waitCards(page, 2);
+    const souris = async (x, y) => {
+      await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
+      await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, x, y });
+      await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, x, y });
+    };
+    const LONGUE = "[...document.querySelectorAll('#marge .carte')].find((c) => c.textContent.includes('Ligne 60'))";
+    const dansLaCarte = () => page.evaluate((s) => { const r = eval(s).getBoundingClientRect(); const haut = document.getElementById('barre').getBoundingClientRect().bottom;
+      return { x: r.left + r.width / 2, y: Math.max(r.top, haut) + 60 }; }, LONGUE);
+    const surLeTexte = () => page.evaluate(() => { const b = document.getElementById('barre').getBoundingClientRect().bottom;
+      const r = [...document.querySelectorAll('#texte .rendu:not(.garde) p')].map((x) => x.getBoundingClientRect()).find((r) => r.top > b + 20 && r.bottom < innerHeight - 80);
+      return { x: r.left + 40, y: r.top + 8 }; });
+    const etat = () => page.evaluate((s) => { const c = eval(s); return { active: c.classList.contains('active'), h: c.offsetHeight, y: scrollY, marques: document.querySelectorAll('#texte .g-actif').length }; }, LONGUE);
+    const replie = async (quoi) => { await page.wait(quoi, (s) => { const c = eval(s); return !c.classList.contains('active') && c.offsetHeight <= 220 && !document.querySelector('.g-actif'); }, LONGUE); };
+    const pause = () => new Promise((r) => setTimeout(r, 400));
+
+    // Le texte défilé jusqu'à la carte : un premier clic la déplie.
+    await page.evaluate((s) => { eval(s).scrollIntoView({ block: 'start', behavior: 'instant' }); window.scrollBy({ top: -220, behavior: 'instant' }); }, LONGUE);
+    await pause();
+    let t = await surLeTexte(); await souris(t.x, t.y); await replie('repliée après un clic sur le texte');
+    let c = await dansLaCarte(); await souris(c.x, c.y);
+    await page.wait('dépliée au clic', (s) => eval(s).classList.contains('active') && eval(s).offsetHeight > 220, LONGUE);
+    await pause();
+
+    // Déjà dépliée : la lire plus bas et cliquer dedans ne ramène pas à son début.
+    for (const pas of [300, 250]) {
+      await page.evaluate((pas) => window.scrollBy({ top: pas, behavior: 'instant' }), pas);
+      await pause();
+      const avant = await etat();
+      c = await dansLaCarte(); await souris(c.x, c.y);
+      await pause();
+      const apres = await etat();
+      assert.equal(apres.y, avant.y, 'la page reste où elle est');
+      assert.ok(apres.active, 'la carte reste dépliée');
+    }
+
+    // Un clic sur la page, puis dans l'espace vide de la marge : repliée.
+    t = await surLeTexte(); await souris(t.x, t.y); await replie('repliée après un clic sur la page');
+    await page.key('j');
+    await page.wait('J reprend à la carte suivante', () => /Courte\./.test(document.querySelector('#marge .carte.active')?.textContent || ''));
+    await page.evaluate((s) => eval(s).scrollIntoView({ block: 'center', behavior: 'instant' }), LONGUE);
+    await page.evaluate((s) => eval(s).focus(), LONGUE);
+    await page.wait('dépliée au focus', (s) => eval(s).classList.contains('active'), LONGUE);
+    const vide = await page.evaluate(() => { const m = document.getElementById('marge').getBoundingClientRect(), b = document.getElementById('barre').getBoundingClientRect().bottom;
+      for (let y = innerHeight - 60; y > b; y -= 20) if (!document.elementFromPoint(m.right - 4, y)?.closest('.carte')) return { x: m.right - 4, y };
+      return null; });
+    if (vide) { await souris(vide.x, vide.y); await replie('repliée après un clic dans la marge'); }
+
+    // Au clavier : la carte se replie quand le focus part ailleurs, pas vers un panneau.
+    await page.evaluate((s) => eval(s).focus(), LONGUE);
+    await page.wait('dépliée au focus de nouveau', (s) => eval(s).classList.contains('active'), LONGUE);
+    await page.evaluate(() => document.getElementById('bouton-reglages').focus());
+    await replie('repliée quand le focus quitte la carte');
+
+    // Répondre : le panneau appartient à la carte, qui reste dépliée pendant la saisie.
+    await page.evaluate((s) => eval(s).focus(), LONGUE);
+    await page.wait('dépliée pour répondre', (s) => eval(s).classList.contains('active'), LONGUE);
+    await page.evaluate((s) => [...eval(s).querySelectorAll('.outils button')].find((b) => /Répondre/.test(b.textContent + b.getAttribute('aria-label'))).click(), LONGUE);
+    await page.wait('panneau de réponse', () => document.getElementById('saisie').open);
+    t = await surLeTexte(); await souris(t.x, t.y);
+    await pause();
+    assert.ok((await etat()).active, 'dépliée tant que le panneau est ouvert');
+    await page.key('Escape');
+    await page.wait('panneau fermé', () => !document.getElementById('saisie').open);
+    await page.send('Emulation.clearDeviceMetricsOverride');
+  }],
+  ['impression en thème sombre : encre foncée, aucun message temporaire', async ({ page }) => {
+    await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; document.getElementById('avis').textContent = 'Vue « Proposé ».'; });
+    const encre = () => page.evaluate(() => { const [r, v, b] = getComputedStyle(document.querySelector('#texte .rendu:not(.garde) p')).color.match(/[\d.]+/g).map(Number); return (r + v + b) / 3; });
+    assert.ok(await encre() > 128, 'à l’écran, le thème sombre écrit clair');
+    await page.send('Emulation.setEmulatedMedia', { media: 'print' });
+    assert.ok(await encre() < 128, 'sur le papier, l’encre est foncée');
+    assert.equal(await page.evaluate(() => getComputedStyle(document.getElementById('avis')).display), 'none');
+    await page.send('Emulation.setEmulatedMedia', { media: '' });
+  }],
+  ['Libertinus Serif choisie : embarquée et chargée', async ({ page }) => {
+    await page.evaluate(() => { const s = document.getElementById('r-police'); s.value = 'libertinus'; s.dispatchEvent(new Event('input', { bubbles: true })); });
+    await page.wait('police appliquée', () => getComputedStyle(document.querySelector('#texte .rendu:not(.garde) p')).fontFamily.includes('Libertinus'));
+    await page.wait('police chargée', async () => { await document.fonts.load('17px "Libertinus Serif"'); return document.fonts.check('17px "Libertinus Serif"') && [...document.fonts].some((f) => f.family.includes('Libertinus') && f.status === 'loaded'); });
+    await page.evaluate(() => { const s = document.getElementById('r-police'); s.value = 'source'; s.dispatchEvent(new Event('input', { bubbles: true })); });
+  }],
+  ['export en PDF : trois versions, commentaires en marge, écran rendu tel quel (P13)', async ({ p, page }) => {
+    await p.stop();
+    const source = "# Titre\n\nPremier {==passage==}{>>Commentaire A.<<} ordinaire.\n\nDeuxième {~~ancien~>nouveau~~}{>>Mot plus juste.<<} et {--retiré--} puis {++ajouté++}.\n\n" +
+      "- élément {==de liste==}{>>Commentaire B.<<}\n- autre élément\n\n> Citation {==citée==}{>>Commentaire C.<<}\n\n| a | b |\n|---|---|\n| cellule {==tableau==}{>>Commentaire D.<<} | x |\n\n" +
+      'Un paragraphe ordinaire pour remplir la page assez longtemps.\n\n'.repeat(40);
+    await p.write(source);
+    await p.start();
+    await page.send('Emulation.setDeviceMetricsOverride', { width: 1366, height: 768, deviceScaleFactor: 1, mobile: false });
+    await page.navigate(p.state.url);
+    await page.evaluate(() => { window.__imp = 0; window.print = () => { window.dispatchEvent(new Event('beforeprint')); window.__imp++; }; });
+    const avant = await p.read();
+    const exporter = async (version, commentaires = true) => {
+      const n = await page.evaluate(() => window.__imp);
+      await page.click('#exporter');
+      await page.wait('panneau d’export', () => !document.getElementById('export').hidden);
+      await page.evaluate((version, commentaires) => {
+        document.querySelector('input[name="export-version"][value="' + version + '"]').click();
+        document.getElementById('export-commentaires').checked = commentaires;
+      }, version, commentaires);
+      await page.click('#export-ok');
+      await page.wait('impression lancée', (n) => window.__imp > n, n);
+    };
+    const finir = async () => {
+      await page.evaluate(() => window.dispatchEvent(new Event('afterprint')));
+      await page.wait('écran rendu', () => document.body.dataset.vue === 'relecture' && !document.querySelector('.note-export, .export-copie') && !document.body.className.includes('export-') && !/—\s*(Modifications apparentes|Actuel|Proposé)$/.test(document.title));
+    };
+    const texte = () => page.evaluate(() => document.querySelector('#texte .rendu:not(.garde)').innerText);
+    const papier = async (fn, ...args) => {
+      await page.send('Emulation.setEmulatedMedia', { media: 'print' });
+      const r = await page.evaluate(fn, ...args);
+      await page.send('Emulation.setEmulatedMedia', { media: '' });
+      return r;
+    };
+
+    // Le panneau part de la vue affichée ; la case ne vaut que pour la relecture ; Échap rend le focus.
+    await page.click('#exporter');
+    assert.equal(await page.evaluate(() => document.querySelector('input[name="export-version"]:checked').value), 'relecture');
+    assert.equal(await page.evaluate(() => document.getElementById('export-commentaires-ligne').hidden), false);
+    await page.evaluate(() => document.querySelector('input[name="export-version"][value="actuel"]').click());
+    assert.equal(await page.evaluate(() => document.getElementById('export-commentaires-ligne').hidden), true);
+    await page.key('Escape');
+    await page.wait('panneau refermé', () => document.getElementById('export').hidden && document.activeElement.id === 'exporter');
+
+    // Relecture : une note par annotation, dans l'ordre, en marge, sans recouvrir le texte.
+    await exporter('relecture');
+    assert.match(await page.evaluate(() => document.title), /— Modifications apparentes$/);
+    const notes = await papier(() => {
+      const t = document.getElementById('texte').getBoundingClientRect();
+      return { mots: document.querySelectorAll('.export-copie span[data-g]:not([class]):not([data-a])').length, origine: getComputedStyle(document.querySelector('#texte .rendu:not(.export-copie):not(.garde)')).display, nb: document.querySelectorAll('.note-export').length, ancres: [...document.querySelectorAll('#texte .export-copie .g-ancre')].filter((x) => getComputedStyle(x).display !== 'none').length,
+        numeros: [...document.querySelectorAll('.note-export .num')].map((x) => x.textContent),
+        droite: t.right, largeur: t.width, gauches: [...document.querySelectorAll('.note-export')].map((x) => x.getBoundingClientRect().left),
+        marges: ['marge', 'barre', 'cote', 'pied'].map((id) => getComputedStyle(document.getElementById(id)).display),
+        boutons: document.querySelectorAll('.note-export button').length, liste: document.querySelector('#texte ul > :not(li)') === null,
+        texteNote: document.querySelector('.note-export').textContent };
+    });
+    assert.equal(notes.mots, 0, 'le papier n’a plus un élément par mot');
+    assert.equal(notes.origine, 'none', 'la page de l’écran ne s’imprime pas en plus');
+    assert.deepEqual(notes.numeros, Array.from({ length: notes.nb }, (_, i) => String(i + 1)), 'dans l’ordre : ' + JSON.stringify(notes));
+    assert.ok(notes.nb >= 7 && notes.ancres === notes.nb, JSON.stringify(notes));
+    assert.ok(notes.gauches.every((g) => g >= notes.droite), 'en marge, hors du texte : ' + JSON.stringify(notes));
+    assert.ok(new Set(notes.gauches.map(Math.round)).size === 1, 'notes alignées : ' + JSON.stringify(notes.gauches));
+    assert.deepEqual([...new Set(notes.marges)], ['none'], 'l’écran ne s’imprime pas');
+    assert.ok(notes.liste, 'une liste ne contient que ses éléments');
+    assert.equal(notes.boutons, 0);
+    assert.match(notes.texteNote, /Commentaire A\./);
+    // Un vrai PDF, en A4 : Chrome imprime ce que les notes annoncent.
+    const pdf = await page.send('Page.printToPDF', { preferCSSPageSize: true });
+    const octets = Buffer.from(pdf.data, 'base64');
+    assert.equal(octets.subarray(0, 5).toString(), '%PDF-');
+    assert.match(octets.toString('latin1'), /MediaBox\s*\[\s*0 0 59[0-9](\.\d+)? 84[0-9](\.\d+)?\s*\]/, 'format A4');
+    await finir();
+
+    // Relecture sans commentaires : les marques restent, les renvois partent.
+    await exporter('relecture', false);
+    const sans = await papier(() => ({ notes: document.querySelectorAll('.note-export').length, ancre: getComputedStyle(document.querySelector('#texte .g-ancre')).display,
+      barre: document.querySelector('.export-copie .g-barre') !== null, hl: getComputedStyle(document.querySelector('.export-copie .g-hl')).backgroundColor }));
+    assert.equal(sans.notes, 0); assert.equal(sans.ancre, 'none'); assert.ok(sans.barre, 'suppressions gardées');
+    assert.equal(sans.hl, 'rgba(0, 0, 0, 0)', 'surlignage retiré');
+    await finir();
+
+    // Actuel, puis Proposé : le texte seul, et la vue d'origine revient.
+    await exporter('actuel');
+    assert.equal(await page.evaluate(() => document.body.dataset.vue), 'actuel');
+    let t = await texte();
+    assert.ok(t.includes('ancien') && !t.includes('nouveau') && !t.includes('ajouté'), t.slice(0, 200));
+    const actuel = await papier(() => ({ notes: document.querySelectorAll('.note-export').length, ancre: getComputedStyle(document.querySelector('.export-copie .g-ancre')).display }));
+    assert.deepEqual(actuel, { notes: 0, ancre: 'none' });
+    assert.match(await page.evaluate(() => document.title), /— Actuel$/);
+    await finir();
+    await exporter('propose');
+    await page.wait('vue Proposé', () => document.body.dataset.vue === 'propose');
+    t = await texte();
+    assert.ok(t.includes('nouveau') && t.includes('ajouté') && !t.includes('ancien') && !t.includes('retiré'), t.slice(0, 200));
+    assert.equal(await papier(() => getComputedStyle(document.querySelector('.export-copie .g-prop')).textDecorationLine), 'none', 'aucune marque de proposition');
+    await finir();
+
+    // Ctrl+P : la vue affichée, avec ses commentaires.
+    await page.evaluate(() => window.print());
+    assert.ok(await page.evaluate(() => document.querySelectorAll('.note-export').length >= 7));
+    await finir();
+
+    // Pendant une saisie, rien ne part : le panneau de saisie ne doit pas être perdu.
+    await openComment(page, 'Deuxième');
+    await page.evaluate(() => document.getElementById('exporter').click());
+    await page.click('#export-ok');
+    assert.match(await page.evaluate(() => document.getElementById('avis').textContent), /panneau de saisie/);
+    assert.equal(await page.evaluate(() => document.body.classList.contains('export-impression')), false);
+    await page.key('Escape');
+    await page.wait('saisie fermée', () => !document.getElementById('saisie').open);
+
+    // Exporter n'écrit rien.
+    assert.ok(avant.equals(await p.read()), 'source inchangée');
+    await page.send('Emulation.clearDeviceMetricsOverride');
+  }],
+  ['qui parle, et ce qu’est devenue une annotation : auteur et IA distincts, états, décisions', async ({ p, page }) => {
+    await p.stop();
+    await p.write('# Titre\n\nPremier {==passage==}{>>Une **question** à *préciser*.<<}{>>glose:v1 id=aaaaaa by=author<<}{>>Oui, **voir** ceci.<<}{>>glose:v1 id=aaaaab by=agent via=Sol model=gpt-5 reply=aaaaaa<<} ordinaire.\n\n' +
+      'En {~~ancien~>nouveau~~}{>>glose:v1 id=bbbbbb by=agent via=Sol<<} mot.\n\nEt {++ajouté++}{>>glose:v1 id=cccccc by=agent via=Sol<<} ici.\n\nPuis {==autre==}{>>Seul.<<}{>>glose:v1 id=dddddd by=author<<} passage.\n');
+    await p.start();
+    await page.navigate(p.state.url);
+    await waitCards(page, 4);
+
+    // Sur la carte : une bulle par personne, jamais du même style, chacune nommée, avec son icône.
+    const fil = await page.evaluate(() => {
+      const c = [...document.querySelectorAll('#marge .carte')].find((x) => x.textContent.includes('voir'));
+      return [...c.querySelectorAll('.msg')].map((m) => ({ classe: m.className, qui: m.querySelector('.qui').textContent, icone: !!m.querySelector('.qui svg'),
+        fond: getComputedStyle(m).backgroundColor, bord: getComputedStyle(m).borderLeftColor, html: m.querySelector('.msg-texte').innerHTML }));
+    });
+    assert.equal(fil.length, 2);
+    assert.match(fil[0].classe, /auteur/); assert.equal(fil[0].qui, 'Auteur');
+    assert.match(fil[1].classe, /agent/); assert.match(fil[1].qui, /^Sol · /);
+    assert.ok(fil[0].icone && fil[1].icone, 'icône de chacun');
+    assert.notEqual(fil[0].fond, fil[1].fond, 'fonds distincts'); assert.notEqual(fil[0].bord, fil[1].bord, 'filets distincts');
+    // Gras et italique, sans marques visibles ; la source garde les siennes.
+    assert.equal(fil[0].html, 'Une <strong>question</strong> à <em>préciser</em>.');
+    assert.equal(fil[1].html, 'Oui, <strong>voir</strong> ceci.');
+    assert.match((await p.read()).toString(), /Une \*\*question\*\* à \*préciser\*\./);
+    // Une proposition nomme son auteur en tête de carte.
+    assert.match(await page.evaluate(() => [...document.querySelectorAll('#marge .carte.prop')][0].querySelector('.meta .qui.agent').textContent), /^Sol/);
+
+    // Dans l'onglet : ce qui attend, et ce qui a reçu une réponse.
+    await page.evaluate(() => document.getElementById('onglet-annotations').click());
+    const etats = () => page.evaluate(() => [...document.querySelectorAll('#annotations-liste .etat')].map((e) => e.textContent));
+    await page.wait('états de la liste', () => document.querySelectorAll('#annotations-liste .etat').length === 4);
+    assert.deepEqual(await etats(), ['Répondu par Sol', 'À décider', 'À décider', 'À remettre']);
+    assert.ok(!(await page.evaluate(() => document.getElementById('annotations-liste').textContent)).includes('**'), 'aucune marque dans les résumés');
+    assert.equal(await page.evaluate(() => document.getElementById('annotations-traitees').textContent), '');
+
+    // Accepter, rejeter : la décision reste visible dans la liste, avec son mot.
+    const decider = async (mot, classe, restant) => {
+      await page.evaluate((mot, classe) => [...document.querySelectorAll('#marge .carte.prop')].find((c) => c.textContent.includes(mot)).querySelector('.outils button.' + classe).click(), mot, classe);
+      await waitCards(page, restant);
+    };
+    await decider('nouveau', 'accepter', 3);
+    await page.wait('Accepté dans la liste', () => document.querySelector('#annotations-traitees .etat.accepte')?.textContent === 'Accepté');
+    await decider('ajouté', 'rejeter', 2);
+    await page.wait('Rejeté dans la liste', () => document.querySelector('#annotations-traitees .etat.rejete')?.textContent === 'Rejeté');
+    assert.deepEqual(await page.evaluate(() => [...document.querySelectorAll('#annotations-traitees .etat')].map((e) => e.textContent)), ['Rejeté', 'Accepté'], 'le plus récent d’abord');
+    assert.deepEqual(await etats(), ['Répondu par Sol', 'À remettre']);
+    assert.match(await page.evaluate(() => document.querySelector('#annotations-traitees h3').textContent), /Traitées \(2\)/);
+
+    // Un clic ouvre l'archive ; rien n'y est décidable.
+    await page.evaluate(() => document.querySelector('#annotations-traitees a').click());
+    await page.wait('archive ouverte', () => document.getElementById('archive').open);
+    assert.match(await page.evaluate(() => document.getElementById('archive-contenu').textContent), /ajouté/);
+    assert.equal(await page.evaluate(() => document.querySelectorAll('#archive-contenu button').length), 0);
+    await page.evaluate(() => document.getElementById('archive').close());
+
+    // Le filtre « de ce tour » ne garde que ce qui est en attente.
+    await page.evaluate(() => { const f = document.getElementById('filtre-statut'); f.value = 'new'; f.dispatchEvent(new Event('change', { bubbles: true })); });
+    await page.wait('filtre appliqué', () => document.getElementById('annotations-traitees').textContent === '');
+    await page.evaluate(() => { const f = document.getElementById('filtre-statut'); f.value = ''; f.dispatchEvent(new Event('change', { bubbles: true })); });
+
+    // Annuler une décision : elle quitte « Traitées » et l'annotation revient.
+    await focusText(page); await page.key('z', 2); await waitCards(page, 3);
+    await page.wait('décision annulée', () => { const t = [...document.querySelectorAll('#annotations-traitees .etat')].map((e) => e.textContent); return t.length === 1 && t[0] === 'Accepté'; });
+
+    // Sur le PDF : le même gras, et chacun nommé.
+    await page.evaluate(() => { window.print = () => { window.dispatchEvent(new Event('beforeprint')); window.__imp = 1; }; document.getElementById('exporter').click(); document.getElementById('export-ok').click(); });
+    await page.wait('impression', () => window.__imp === 1);
+    const note = await page.evaluate(() => [...document.querySelectorAll('.note-export')].find((n) => n.textContent.includes('voir')).innerHTML);
+    assert.match(note, /<strong>question<\/strong>/); assert.match(note, /class="message auteur"/); assert.match(note, /class="message agent"/); assert.match(note, /Auteur : /); assert.match(note, /Sol : /);
+    await page.evaluate(() => window.dispatchEvent(new Event('afterprint')));
+    await page.wait('écran rendu', () => !document.querySelector('.export-copie'));
+  }],
+  ['retour au texte depuis Vos projets : position gardée, menu complet, thèmes', async ({ p, page }) => {
+    await p.stop();
+    await p.write('# Mon texte\n\n' + 'Un paragraphe ordinaire pour remplir la page assez longtemps.\n\n'.repeat(90));
+    await p.start();
+    await page.send('Emulation.setDeviceMetricsOverride', { width: 1366, height: 768, deviceScaleFactor: 1, mobile: false });
+    await page.navigate(p.state.url);
+    await page.evaluate(() => window.scrollTo({ top: 2000, behavior: 'instant' }));
+    await new Promise((r) => setTimeout(r, 300));
+    const repere = () => page.evaluate(() => { const b = document.getElementById('barre').getBoundingClientRect().bottom;
+      const i = [...document.querySelectorAll('#texte .rendu:not(.garde) p')].findIndex((x) => x.getBoundingClientRect().top >= b); return { i, y: scrollY }; });
+    const avant = await repere();
+    assert.ok(avant.y > 1500 && avant.i > 5, JSON.stringify(avant));
+    const proche = (nom, r) => assert.ok(Math.abs(r.i - avant.i) <= 1, nom + ' : ' + JSON.stringify([avant, r]));
+    const accueil = async () => {
+      await page.evaluate(() => document.getElementById('retour-accueil').click());
+      await page.wait('accueil', () => location.pathname === '/home' && document.getElementById('acc-texte') !== null);
+    };
+    const texte = () => page.wait('texte revenu', () => location.pathname === '/' && document.querySelectorAll('#texte .rendu:not(.garde) p').length > 80 && scrollY > 1000);
+
+    // L'accueil propose le retour, avec le titre du texte ; le lien retrouve la place.
+    await accueil();
+    assert.match(await page.evaluate(() => document.getElementById('acc-texte').textContent), /Revenir au texte/);
+    assert.match(await page.evaluate(() => document.getElementById('acc-texte').textContent), /projet-|Mon texte/);
+    await page.evaluate(() => document.getElementById('acc-texte').click());
+    await texte();
+    proche('lien', await repere());
+    // Le bouton Précédent du navigateur aussi.
+    await accueil();
+    await page.evaluate(() => history.back());
+    await texte();
+    proche('précédent', await repere());
+    // Recharger la page aussi.
+    await page.evaluate(() => location.reload());
+    await new Promise((r) => setTimeout(r, 500));
+    await texte();
+    proche('rechargement', await repere());
+
+    // Les mêmes entrées partout : Agents ne fait pas disparaître Réglages.
+    await accueil();
+    const entrees = () => page.evaluate(() => [...document.querySelectorAll('.acc-nav nav a:not(.acc-revenir), .acc-nav nav button')].map((e) => e.textContent.trim()));
+    assert.deepEqual(await entrees(), ['Accueil', 'Agents', 'Réglages']);
+    await page.evaluate(() => document.getElementById('acc-agents').click());
+    await page.wait('page Agents', () => location.pathname === '/set' && document.getElementById('acc-reglages') !== null);
+    assert.deepEqual(await entrees(), ['Accueil', 'Agents', 'Réglages']);
+    assert.ok(await page.evaluate(() => document.getElementById('acc-texte') !== null), 'retour au texte depuis Agents');
+
+    // Réglages depuis Agents : choisir un thème l'applique et l'enregistre pour tous les projets.
+    await page.evaluate(() => document.getElementById('acc-reglages').click());
+    await page.wait('réglages ouverts', () => document.getElementById('espace-reglages').open && document.querySelectorAll('.theme-carte').length >= 18);
+    const noms = await page.evaluate(() => [...document.querySelectorAll('.theme-nom')].map((e) => e.textContent));
+    for (const n of ['Glose Default (clair)', 'Glose Default (sombre)', 'Nord', 'Tokyo Night']) assert.ok(noms.includes(n), n);
+    await page.evaluate(() => document.querySelector('.theme-carte input[value="tokyo-night"]').click());
+    assert.equal(await page.evaluate(() => document.documentElement.dataset.theme), 'tokyo-night');
+    await page.wait('thème enregistré', async () => (await (await fetch('/api/settings', { headers: { 'X-Glose-Token': sessionStorage.getItem('glose-jeton') } })).json()).theme === 'tokyo-night');
+    const reglages = (await p.api('/api/settings')).theme;
+    assert.equal(reglages, 'tokyo-night');
+
+    // Le lecteur le reprend ; son panneau Affichage en change ; le papier reste clair.
+    await page.navigate(p.state.url);
+    const peinture = () => page.evaluate(() => ({ theme: document.documentElement.dataset.theme, schema: getComputedStyle(document.documentElement).colorScheme, papier: getComputedStyle(document.getElementById('texte')).backgroundColor, encre: getComputedStyle(document.querySelector('#texte .rendu:not(.garde) p')).color }));
+    await page.wait('thème repris', () => document.documentElement.dataset.theme === 'tokyo-night');
+    const nuit = await peinture();
+    assert.match(nuit.schema, /dark/); assert.equal(nuit.papier, 'rgb(26, 27, 38)');
+    assert.equal(await page.evaluate(() => document.querySelectorAll('#r-theme optgroup').length), 2);
+    await page.evaluate(() => { const s = document.getElementById('r-theme'); s.value = 'rose-pine-dawn'; s.dispatchEvent(new Event('input', { bubbles: true })); });
+    const aube = await peinture();
+    assert.match(aube.schema, /light/); assert.notEqual(aube.papier, nuit.papier);
+    await page.evaluate(() => { const s = document.getElementById('r-theme'); s.value = 'tokyo-night'; s.dispatchEvent(new Event('input', { bubbles: true })); });
+    await page.send('Emulation.setEmulatedMedia', { media: 'print' });
+    const papier = await peinture();
+    await page.send('Emulation.setEmulatedMedia', { media: '' });
+    const [r, v, b] = papier.encre.match(/\d+/g).map(Number);
+    assert.ok((r + v + b) / 3 < 128, 'encre foncée sur le papier : ' + papier.encre);
+    await page.evaluate(() => { const s = document.getElementById('r-theme'); s.value = 'system'; s.dispatchEvent(new Event('input', { bubbles: true })); });
+    await new Promise((r) => setTimeout(r, 500));
+    await page.send('Emulation.clearDeviceMetricsOverride');
+  }],
+  ['marge dense : 40 cartes aux trois largeurs (P12.4)', async ({ p, page }) => {
+    const source = '# Marge dense\n\n' + Array.from({ length: 40 }, (_, i) => {
+      const passage = i % 2 ? '{~~formulation ancienne~>formulation proposée~~}' : '{==passage commenté==}{>>Préciser ce passage.<<}';
+      return `Paragraphe ${i + 1} : ${passage}. Une phrase ordinaire pour conserver le contexte.\n\n`;
+    }).join('');
+    await p.write(source); await page.navigate(p.state.url); await waitCards(page, 40);
+    for (const largeur of ['16rem', '18rem', '20rem']) {
+      await page.evaluate((v) => {
+        document.documentElement.style.setProperty('--marge', v);
+        window.dispatchEvent(new Event('resize'));
+      }, largeur);
+      await page.wait('40 cartes disposées sans recouvrement à ' + largeur, () => {
+        const cartes = [...document.querySelectorAll('#marge .carte')];
+        const badges = [...document.querySelectorAll('#texte .g-ancre')];
+        const rects = cartes.map((c) => c.getBoundingClientRect());
+        return cartes.length === 40 && badges.length === 40 &&
+          Math.abs(rects[0].top - (badges[0].getBoundingClientRect().top - 6)) <= 2 &&
+          rects.every((r, i) => !i || r.top >= rects[i - 1].bottom + 5) &&
+          cartes.every((c) => c.scrollWidth <= c.clientWidth + 1);
+      });
+      await page.evaluate(() => document.querySelector('#marge .carte').focus());
+      await page.wait('actions accessibles au focus', () => document.querySelector('#marge .carte').classList.contains('active'));
+      const boutons = await page.evaluate(() => [...document.querySelectorAll('#marge .carte.active .outils button')].map((b) =>
+        ({ label: b.getAttribute('aria-label'), texte: b.textContent, h: b.getBoundingClientRect().height })));
+      for (const b of boutons) { assert.equal(b.texte, b.label); assert.ok(b.h >= 28 && b.h <= 32); }
+      await page.evaluate(() => document.getElementById('texte').click());
+    }
+    assert.equal((await p.read()).toString(), source, 'la consultation ne change aucun octet');
   }],
   ['brouillons : rechargement, nouveau port et ordre des fichiers', async ({ p, page }) => {
     const original = await p.read();
@@ -582,6 +965,257 @@ const scenarios = [
     await page.click('#fichiers ul.tete a.partie');
     await page.wait('tout le projet', () => document.querySelectorAll('.glose-file').length === 2);
   }],
+  ['réduction des barres à 1366 × 768 : hauteur de texte, sans saut (P12.3)', async ({ p, page }) => {
+    await p.stop();
+    await p.write('# Titre\n\n' + 'Un paragraphe ordinaire, pour faire défiler le texte de cette page assez longtemps.\n\n'.repeat(80));
+    await p.start();
+    await page.send('Emulation.setDeviceMetricsOverride', { width: 1366, height: 768, deviceScaleFactor: 1, mobile: false });
+    try {
+      await page.navigate(p.state.url);
+      const mesure = () => page.evaluate(() => {
+        const barre = document.getElementById('barre').getBoundingClientRect();
+        const pied = document.getElementById('pied').getBoundingClientRect();
+        const p = [...document.querySelectorAll('#texte .rendu:not(.garde) p')][30].getBoundingClientRect();
+        return { barre: barre.bottom, utile: pied.top - barre.bottom, repere: p.top + scrollY, reduite: document.body.classList.contains('barres-reduites'), large: document.documentElement.scrollWidth - document.documentElement.clientWidth };
+      });
+      // Polices et réglages posés : ils changent les coupures de ligne, donc le repère.
+      await page.evaluate(async () => { await document.fonts.ready; await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))); });
+      const avant = await mesure();
+      assert.equal(avant.large, 0, 'pas de débordement');
+      await page.evaluate(() => window.scrollTo(0, 900));
+      await page.wait('barres réduites', () => document.body.classList.contains('barres-reduites'));
+      await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+      const apres = await mesure();
+      assert.ok(apres.barre <= 48, 'une seule ligne, 48 px au plus : ' + apres.barre);
+      assert.ok(apres.utile >= 768 - 56 - 32, 'au moins la hauteur de texte d’avant la refonte : ' + apres.utile);
+      assert.ok(Math.abs(apres.repere - avant.repere) <= 2, 'le texte ne saute pas : ' + avant.repere + ' / ' + apres.repere);
+      // Rien n'est perdu dans la ligne compacte.
+      assert.ok(await page.evaluate(() => document.getElementById('retablir').getBoundingClientRect().right <= document.getElementById('exporter').getBoundingClientRect().left), 'export après Rétablir');
+      for (const id of ['remettre', 'annuler', 'retablir', 'exporter', 'vues', 'bouton-reglages', 'ouvrir-recherche', 'retour-accueil']) {
+        assert.ok(await page.evaluate((id) => { const r = document.getElementById(id).getBoundingClientRect(); return r.width > 0 && r.top >= 0 && r.bottom <= 48; }, id), id + ' dans la ligne compacte');
+      }
+      await page.click('#ouvrir-recherche');
+      await page.wait('recherche rouverte', () => document.activeElement.id === 'recherche-texte' && document.getElementById('recherche-texte').getBoundingClientRect().width > 0);
+      await page.key('Escape');
+      await page.key('Escape');
+      assert.ok(!(await p.read()).toString().includes('{'), 'rien d’écrit');
+    } finally {
+      await page.send('Emulation.clearDeviceMetricsOverride');
+    }
+  }],
+  ['panneau Commenter en bas de page : entier, sans défilement, passage visible', async ({ p, page }) => {
+    await p.stop();
+    await p.write('# Titre\n\n' + 'Un paragraphe ordinaire pour remplir la page assez longtemps.\n\n'.repeat(60));
+    await p.start();
+    for (const [w, h] of [[1600, 1000], [1366, 768]]) {
+      await page.send('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 1, mobile: false });
+      await page.navigate(p.state.url);
+      await page.evaluate((h) => {
+        const ps = [...document.querySelectorAll('#texte .rendu:not(.garde) p')];
+        const q = ps.find((x) => x.getBoundingClientRect().top > h - 160);
+        const sp = q.querySelectorAll('span[data-g]'), r = document.createRange();
+        r.setStartBefore(sp[2]); r.setEndAfter(sp[8]);
+        const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+        document.getElementById('bouton-commenter').click();
+      }, h);
+      await page.wait('panneau ouvert', () => document.getElementById('saisie').open);
+      await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+      const m = await page.evaluate(() => {
+        const d = document.getElementById('saisie'), c = d.querySelector('.corps'), ok = document.getElementById('saisie-ok').getBoundingClientRect();
+        const b = d.getBoundingClientRect(), bq = document.getElementById('saisie-extrait').getBoundingClientRect(), pied = document.getElementById('pied').getBoundingClientRect();
+        return { defile: c.scrollHeight - c.clientHeight, bas: b.bottom, pied: pied.top, okBas: ok.bottom, extrait: bq.height };
+      });
+      assert.ok(m.defile <= 1, w + ' : le corps du panneau ne défile pas : ' + JSON.stringify(m));
+      assert.ok(m.bas <= m.pied && m.okBas <= m.pied, w + ' : le panneau finit au-dessus du pied : ' + JSON.stringify(m));
+      assert.ok(m.extrait > 20, w + ' : extrait lisible : ' + JSON.stringify(m));
+      await page.key('Escape');
+      await page.wait('fermé', () => !document.getElementById('saisie').open);
+    }
+    await page.send('Emulation.clearDeviceMetricsOverride');
+  }],
+  ['panneau de saisie ouvert : ni décision, ni remise, ni second panneau (P12.7)', async ({ p, page }) => {
+    await p.stop();
+    await p.write('Un premier {++ajout++}{>>glose:v1 id=aaaaaa by=agent<<} dans le texte.\n\nUn second paragraphe assez simple.\n');
+    await p.start(); await page.navigate(p.state.url);
+    await waitCards(page, 1);
+    await page.evaluate(() => {
+      const q = [...document.querySelectorAll('#texte .rendu:not(.garde) p')].find((x) => x.textContent.includes('second'));
+      const sp = q.querySelectorAll('span[data-g]'), r = document.createRange();
+      r.setStartBefore(sp[0]); r.setEndAfter(sp[2]);
+      const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+    });
+    await page.evaluate(() => document.getElementById('bouton-commenter').click());
+    await page.wait('panneau ouvert', () => document.getElementById('saisie').open);
+    await page.fill('#saisie-texte', 'Ma remarque en cours.');
+    const avant = (await p.read()).toString();
+    await page.evaluate(() => document.querySelector('#marge button[aria-label="Accepter"]').click());
+    await page.evaluate(() => document.getElementById('remettre').click());
+    await page.evaluate(() => new Promise((r) => setTimeout(r, 300)));
+    assert.equal(await page.evaluate(() => document.getElementById('remise').open), false, 'pas de remise');
+    assert.equal(await page.evaluate(() => document.getElementById('saisie-texte').value), 'Ma remarque en cours.', 'saisie gardée');
+    assert.equal((await p.read()).toString(), avant, 'aucune décision écrite');
+    await page.key('Escape');
+    await page.wait('panneau refermé', () => !document.getElementById('saisie').open);
+  }],
+  ['poignée « + » d’un paragraphe et son menu', async ({ p, page }) => {
+    await p.stop();
+    await p.write('# Titre\n\nPremier paragraphe assez simple.\n\nSecond paragraphe assez simple.\n\n- un élément\n- un autre\n');
+    await p.start(); await page.navigate(p.state.url);
+    await page.wait('texte', () => document.querySelector('#texte .rendu:not(.garde) p'));
+    const survol = async (texte) => {
+      const pos = await page.evaluate((texte) => {
+        const b = [...document.querySelectorAll('#texte .rendu:not(.garde) p, #texte .rendu:not(.garde) li')].find((x) => x.textContent.includes(texte));
+        b.scrollIntoView({ block: 'center', behavior: 'instant' });
+        const r = b.getBoundingClientRect();
+        return { x: r.x + 20, y: r.y + r.height / 2 };
+      }, texte);
+      await page.send('Input.dispatchMouseEvent', { type: 'mouseMoved', ...pos });
+    };
+    const aligne = (texte) => page.wait('poignée à gauche de « ' + texte + ' »', (texte) => {
+      const o = document.getElementById('outils-bloc');
+      if (o.hidden) return false;
+      const b = [...document.querySelectorAll('#texte .rendu:not(.garde) p, #texte .rendu:not(.garde) li')].find((x) => x.textContent.includes(texte)).getBoundingClientRect();
+      const r = document.getElementById('poignee').getBoundingClientRect();
+      return r.width > 0 && r.right <= b.left && r.left >= 0 && r.bottom > b.top && r.top < b.top + 40
+        && document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)?.closest('#poignee');
+    }, texte);
+    await survol('Premier'); await aligne('Premier');
+    await survol('Second'); await aligne('Second');
+    await survol('un autre'); await page.wait('poignée sur un élément de liste', () => !document.getElementById('outils-bloc').hidden);
+    await survol('Second'); await aligne('Second');
+    await page.click('#poignee');
+    await page.wait('menu ouvert', () => document.getElementById('outils-bloc').classList.contains('ouvert'));
+    const items = await page.evaluate(() => [...document.querySelectorAll('#menu-bloc button')].map((b) => [b.id, b.getBoundingClientRect().width > 0]));
+    assert.deepEqual(items, [['menu-avant', true], ['menu-commenter', true], ['menu-suggerer', true], ['menu-apres', true]], 'quatre gestes visibles, dans cet ordre');
+    await page.key('Escape');
+    await page.wait('menu refermé', () => !document.getElementById('outils-bloc').classList.contains('ouvert'));
+    for (const [id, panneau, titre] of [['menu-commenter', 'saisie', 'Second'], ['menu-suggerer', 'edition', 'Second'], ['menu-avant', 'edition', ''], ['menu-apres', 'edition', '']]) {
+      await survol('Premier'); await survol('Second'); await aligne('Second');
+      await page.click('#poignee');
+      await page.click('#' + id);
+      await page.wait('panneau ' + panneau + ' depuis ' + id, (panneau) => document.getElementById(panneau).open, panneau);
+      if (id === 'menu-avant' || id === 'menu-apres') {
+        const types = await page.evaluate(() => { const t = document.getElementById('edition-types'); return !t.hidden && [...t.querySelectorAll('button')].map((b) => b.dataset.type); });
+        assert.deepEqual(types, ['paragraphe', 'titre', 'liste', 'tableau', 'encadre', 'image', 'code'], 'types proposés');
+      }
+      await page.key('Escape');
+      await page.wait('panneau fermé', (panneau) => !document.getElementById(panneau).open, panneau);
+      // Le menu d'où il venait est refermé : le focus revient au texte, et non nulle part.
+      await page.wait('focus rendu au texte', () => document.activeElement.id === 'texte');
+    }
+    // Un événement « close » en retard ne reprend pas un focus déjà placé ailleurs.
+    await survol('Premier'); await survol('Second'); await aligne('Second');
+    await page.click('#poignee');
+    await page.click('#menu-apres');
+    await page.wait('panneau rouvert', () => document.getElementById('edition').open);
+    await page.evaluate(() => { const d = document.getElementById('edition'); d.close(); document.getElementById('bouton-reglages').focus(); });
+    await page.evaluate(() => new Promise((r) => setTimeout(r, 50)));
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'bouton-reglages');
+    // Au clavier : la touche + ouvre le menu, les flèches le parcourent, Entrée agit.
+    await focusText(page);
+    await page.evaluate(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: '+', bubbles: true, cancelable: true })));
+    await page.wait('menu ouvert au clavier', () => document.getElementById('outils-bloc').classList.contains('ouvert') && document.activeElement.id === 'menu-commenter');
+    assert.ok(await page.evaluate(() => { const r = document.getElementById('poignee').getBoundingClientRect(); return r.width > 0 && r.top >= 0 && r.bottom <= innerHeight; }), 'poignée visible à l’écran');
+    await page.key('ArrowDown');
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'menu-suggerer');
+    await page.key('Escape');
+    await page.wait('menu refermé au clavier', () => !document.getElementById('outils-bloc').classList.contains('ouvert') && document.activeElement.id === 'poignee');
+    assert.ok(!(await p.read()).toString().includes('{'), 'aucune marque écrite sans saisie');
+    // Pendant le tour de l'agent : pas de poignée, l'auteur lit.
+    await page.evaluate(() => document.getElementById('remettre').click());
+    await page.wait('boîte de remise', () => document.getElementById('remise').open);
+    await page.click('#remise-ok');
+    await page.wait('main à l’agent', () => document.body.classList.contains('main-agent'));
+    await survol('Premier');
+    await page.wait('poignée masquée', () => {
+      const o = document.getElementById('outils-bloc');
+      return o.hidden || getComputedStyle(o).display === 'none' || getComputedStyle(o).visibility === 'hidden';
+    });
+    await page.evaluate(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: '+', bubbles: true, cancelable: true })));
+    assert.equal(await page.evaluate(() => document.getElementById('outils-bloc').classList.contains('ouvert')), false, 'pas de menu au clavier pendant le tour de l’agent');
+  }],
+  ['accueil : trois projets dont un introuvable, ouvrir, modifier, créer (P11.5, P11.9)', async ({ p, page, root }) => {
+    await p.stop();
+    const base = path.join(p.dir, 'mes-projets');
+    // Le dossier temporaire du système n'entre pas au registre : il est ailleurs le temps de l'essai.
+    p.env.TMPDIR = path.join(p.dir, 'systeme-tmp'); await fs.mkdir(p.env.TMPDIR);
+    const projet = async (nom, profil) => {
+      const d = path.join(base, nom); await fs.mkdir(d, { recursive: true });
+      await fs.writeFile(path.join(d, 'a.md'), '# Titre\n\nUn {>>mot<<} texte.\n');
+      await fs.writeFile(path.join(d, 'glose.json'), profil);
+      return d;
+    };
+    const livre = await projet('livre', '{\r\n  "title": "Livre <b>gras</b>",\r\n  "project": {\r\n    "type": "ouvrage",\r\n    "status": "review",\r\n    "deadline": "2020-01-01"\r\n  }\r\n}\r\n');
+    const note = await projet('note', '{"title":"Une note"}');
+    const disparu = path.join(base, 'disparu');
+    await fs.mkdir(p.env.GLOSE_CONFIG_DIR, { recursive: true });
+    await fs.writeFile(path.join(p.env.GLOSE_CONFIG_DIR, 'projets.json'), JSON.stringify({ version: 1, projects: [livre, note, disparu].map((root) => ({ root, opened: '2026-11-01T10:00:00Z' })) }));
+    await fs.mkdir(path.join(p.env.GLOSE_CONFIG_DIR, 'gabarits/article'), { recursive: true });
+    await fs.writeFile(path.join(p.env.GLOSE_CONFIG_DIR, 'gabarits/article/plan.md'), '# Plan\n');
+    await p.start();
+    await page.navigate(`http://127.0.0.1:${p.state.port}/home#t=${p.state.token}`, '#acc-lignes tr');
+    assert.equal(await page.evaluate(() => location.hash), '', 'jeton retiré de la barre d’adresse');
+    const lignes = () => page.evaluate(() => [...document.querySelectorAll('#acc-lignes tr')].map((tr) => tr.textContent));
+    await page.wait('trois lignes', () => document.querySelectorAll('#acc-lignes tr').length === 3);
+    const texte = await lignes();
+    assert.match(texte[0], /Livre <b>gras<\/b>/, 'titre laissé en texte');
+    assert.match(texte[0], /Dépassée/);
+    assert.match(texte.join(' '), /Dossier introuvable/);
+    assert.equal(await page.evaluate(() => !!document.querySelector('#acc-lignes b')), false, 'aucun HTML venu du projet');
+    assert.match(await page.evaluate(() => document.getElementById('acc-stats').textContent), /Projets\s*3/);
+    // Recherche et filtre.
+    await page.fill('#acc-recherche', 'note');
+    await page.wait('recherche', () => document.querySelectorAll('#acc-lignes tr').length === 1 && document.querySelector('#acc-lignes tr').textContent.includes('Une note'));
+    await page.fill('#acc-recherche', '');
+    await page.wait('recherche effacée', () => document.querySelectorAll('#acc-lignes tr').length === 3);
+    // Modifier : seule la valeur change ; une empreinte périmée garde la saisie.
+    await page.evaluate(() => [...document.querySelectorAll('#acc-lignes tr')].find((t) => t.textContent.includes('Livre')).querySelector('button[aria-label*="Modifier"], button[title*="Modifier"]').click());
+    await page.wait('formulaire', () => document.getElementById('acc-modifier').open);
+    await fs.writeFile(path.join(livre, 'glose.json'), (await fs.readFile(path.join(livre, 'glose.json'), 'utf8')).replace('Livre', 'Livre revu'));
+    await page.evaluate(() => { const f = document.getElementById('acc-form-modifier'); f.elements.nextAction.value = 'Relire la partie 2'; });
+    await page.evaluate(() => document.getElementById('acc-form-modifier').requestSubmit());
+    await page.wait('conflit dit', () => /a changé/.test(document.getElementById('acc-modifier').textContent) && document.getElementById('acc-modifier').open);
+    assert.equal(await page.evaluate(() => document.getElementById('acc-form-modifier').elements.nextAction.value), 'Relire la partie 2', 'saisie gardée');
+    assert.ok(!(await fs.readFile(path.join(livre, 'glose.json'), 'utf8')).includes('Relire'), 'rien d’écrit');
+    await page.evaluate(() => document.getElementById('acc-modifier').close());
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await page.wait('liste relue', () => [...document.querySelectorAll('#acc-lignes tr')].some((t) => t.textContent.includes('Livre revu')));
+    await page.evaluate(() => [...document.querySelectorAll('#acc-lignes tr')].find((t) => t.textContent.includes('Livre')).querySelector('button[aria-label*="Modifier"], button[title*="Modifier"]').click());
+    await page.wait('formulaire de nouveau', () => document.getElementById('acc-modifier').open);
+    await page.evaluate(() => { const f = document.getElementById('acc-form-modifier'); f.elements.nextAction.value = 'Relire la partie 2'; f.requestSubmit(); });
+    await page.wait('ligne à jour', () => [...document.querySelectorAll('#acc-lignes tr')].some((t) => t.textContent.includes('Relire la partie 2')));
+    assert.equal(await fs.readFile(path.join(livre, 'glose.json'), 'utf8'), '{\r\n  "title": "Livre revu <b>gras</b>",\r\n  "project": {\r\n    "type": "ouvrage",\r\n    "status": "review",\r\n    "deadline": "2020-01-01",\r\n    "nextAction": "Relire la partie 2"\r\n  }\r\n}\r\n', 'seule la valeur ajoutée');
+    // Nouveau projet : erreurs, puis création sans écraser.
+    const neuf = path.join(base, 'neuf');
+    await page.evaluate(() => [...document.querySelectorAll('button')].find((b) => /Nouveau projet/.test(b.textContent)).click());
+    await page.wait('formulaire nouveau', () => document.getElementById('acc-nouveau').open);
+    assert.deepEqual(await page.evaluate(() => [...document.getElementById('acc-form-nouveau').elements.type.options].map((o) => o.value)), ['', 'article']);
+    const soumettre = (chemin, type) => page.evaluate((chemin, type) => { const f = document.getElementById('acc-form-nouveau'); f.elements.path.value = chemin; f.elements.type.value = type; f.requestSubmit(); }, chemin, type);
+    await soumettre(neuf, 'article');
+    await page.wait('dossier absent dit', () => /n'existe pas/.test(document.getElementById('acc-nouveau').textContent));
+    await fs.mkdir(neuf); await fs.writeFile(path.join(neuf, 'plan.md'), '# À moi\n');
+    await soumettre(livre, 'article');
+    await page.wait('projet existant dit', () => /déjà un projet/.test(document.getElementById('acc-nouveau').textContent));
+    await soumettre(neuf, 'article');
+    await page.wait('créé', () => !document.getElementById('acc-nouveau').open && document.querySelectorAll('#acc-lignes tr').length === 4);
+    assert.equal(await fs.readFile(path.join(neuf, 'plan.md'), 'utf8'), '# À moi\n', 'rien d’écrasé');
+    // Retirer : le dossier n'est pas touché.
+    await page.evaluate(() => [...document.querySelectorAll('#acc-lignes tr')].find((t) => t.textContent.includes('Dossier introuvable')).querySelector('button').click());
+    await page.wait('confirmation', () => document.getElementById('acc-retirer').open);
+    await page.evaluate(() => document.getElementById('acc-form-retirer').requestSubmit());
+    await page.wait('retiré', () => document.querySelectorAll('#acc-lignes tr').length === 3);
+    // Ouvrir : un autre serveur, l'adresse à jeton n'arrive que par ce clic ; et retour.
+    await page.evaluate(() => [...document.querySelectorAll('#acc-lignes tr')].find((t) => t.textContent.includes('Une note')).click());
+    await page.wait('projet ouvert', () => location.pathname === '/' && document.querySelector('#texte .rendu:not(.garde) p'));
+    const ouvert = await page.evaluate(() => document.getElementById('titre').textContent);
+    assert.match(ouvert, /Une note/);
+    const lien = await page.evaluate(() => document.getElementById('retour-accueil')?.getAttribute('href'));
+    assert.equal(lien, '/home', 'retour vers l’accueil depuis un projet');
+    await page.evaluate(() => document.getElementById('retour-accueil').click());
+    await page.wait('accueil depuis le projet', () => location.pathname === '/home' && document.querySelectorAll('#acc-lignes tr').length === 3);
+    assert.match(await page.evaluate(() => [...document.querySelectorAll('#acc-lignes tr')].find((t) => t.textContent.includes('Une note')).textContent), /serveur en marche/i);
+    p.cli('stop', note);
+  }],
   ['navigation, recherche globale et archives', async ({ p, page }) => {
     await p.stop();
     const a = '# Introduction\n\nVoir [le chapitre](chapitre/b%20espace.md#suite).\n\nVoir [le renvoi caché](#suite).\n';
@@ -593,6 +1227,12 @@ const scenarios = [
     await p.write(JSON.stringify({ version: 1, sections: { 'a.md#gl-introduction': { status: 'relue', title: 'Introduction' } } }), '.glose/progression.json');
     await p.start(); await page.navigate(p.state.url);
     await page.wait('progression antérieure conservée', () => document.querySelector('#sommaire .ligne.relue'));
+    // P11.3 : le navigateur retient les titres de chaque fichier affiché, et
+    // leur clé est celle des sections marquées.
+    await until('titres retenus pour l\'accueil', async () => {
+      const lu = JSON.parse(await fs.readFile(path.join(p.dir, '.glose/progression.json'), 'utf8'));
+      return lu.headings?.['a.md']?.includes('gl-introduction') && lu.headings['chapitre/b espace.md']?.length === 2 && lu.sections['a.md#gl-introduction'];
+    });
     await page.click('#onglet-fichiers');
     await page.evaluate(() => [...document.querySelectorAll('#fichiers a.partie')].find((a) => a.textContent === 'a').click());
     await page.wait('a seul', () => document.querySelectorAll('#texte .rendu:not(.garde) .glose-file').length === 1 && document.querySelector('#texte .rendu:not(.garde) .glose-file').dataset.path === 'a.md');

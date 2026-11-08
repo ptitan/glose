@@ -6,12 +6,12 @@
 ./scripts/test-browser.sh
 ```
 
-La commande reconstruit Glose puis exécute onze scénarios avec **le vrai serveur, pandoc et un vrai Chrome/Chromium sans interface**. Elle ne dépend ni des outils d'un agent IA ni d'un paquet npm. Aucune installation ni aucun téléchargement automatique.
+La commande reconstruit Glose puis exécute ses scénarios avec **le vrai serveur, pandoc et un vrai Chrome/Chromium sans interface**, puis ceux de Firefox (P8.1 : WebDriver BiDi, `scripts/browser/firefox.cjs`, sans paquet ; `GLOSE_FIREFOX=0` les saute, `GLOSE_FIREFOX=chemin` choisit le programme ; Firefox absent fait échouer l'essai). Elle ne dépend ni des outils d'un agent IA ni d'un paquet npm. Aucune installation ni aucun téléchargement automatique.
 
 Prérequis de développement, non requis pour utiliser Glose :
 - Go et pandoc, comme pour les autres tests ;
 - Node.js **22 ou plus récent** (WebSocket et moteur de test intégrés) ;
-- Chrome ou Chromium installé.
+- Chrome ou Chromium installé, et Firefox.
 
 Le navigateur est cherché dans le `PATH`, puis aux emplacements usuels de Chrome sur Windows et macOS. Pour en choisir un :
 
@@ -41,7 +41,7 @@ Le fichier est comparé en octets aux moments utiles ; `glose check` valide chaq
 
 Les touches et la saisie utilisent les événements du navigateur, les clics leurs coordonnées après stabilisation des animations. La sélection est préparée avec un `Range` du DOM, sans fabriquer de positions source. Les attentes vérifient des états avec une échéance, pas un délai supposé suffisant. Une action de l'auteur ou une assertion n'est jamais réessayée pour masquer un échec. Seul l'accès initial au nouveau port local peut attendre son transfert WSL → Windows.
 
-**Limites assumées** : moteur Chromium seulement ; pas de glisser de souris physique, de presse-papiers système ni de clavier IME installé dans l'OS. La composition est commandée par CDP, et la garde Ctrl+Entrée est aussi exercée par un événement explicitement composé. Ces essais ne remplacent pas une vérification manuelle d'accessibilité, de rendu visuel ou d'IME natif. Les corpus complexes restent couverts par les tests Go et les essais sur copie de textes réels.
+**Limites assumées** : la plupart des scénarios sous Chromium seulement ; pas de glisser de souris physique, de presse-papiers système ni de clavier IME installé dans l'OS. La composition est commandée par CDP, et la garde Ctrl+Entrée est aussi exercée par un événement explicitement composé. Ces essais ne remplacent pas une vérification manuelle d'accessibilité, de rendu visuel ou d'IME natif. Les corpus complexes restent couverts par les tests Go et les essais sur copie de textes réels.
 
 ## Isolation et diagnostics
 

@@ -17,34 +17,77 @@ glose open        # lance le serveur en arrière-plan et ouvre le navigateur
 - **Un seul fichier**, hors de tout projet : `glose open notes.md`.
 - `glose stop` arrête le serveur ; `glose status` dit s'il tourne et à quelle adresse.
 
+## 1 bis. Retrouver ses projets
+
+`glose open` et `glose init` inscrivent un projet à profil dans un registre personnel (`projets.json`, à côté des réglages des agents : le chemin et la date, rien d'autre ; le perdre ne perd rien). Ce qui vit dans le dossier temporaire du système n'y entre pas.
+
+`glose home` ouvre la page de vos projets, relus à chaque fois dans leur dossier sans rien y écrire : à qui est la main, annotations, avancement, échéance, serveur en marche, prochaine action. Par défaut, ce qui attend votre main vient d'abord, puis l'échéance la plus proche. Filtrez par type et par statut, cherchez par titre. Un clic ouvre le projet, en démarrant son serveur s'il le faut ; depuis un projet, le logo et le lien « Projets » reviennent ici. **Nouveau projet** prépare un dossier existant (son chemin, et un gabarit s'il y en a) sans rien écraser. La page ne remet ni ne décide rien : on décide dans le texte, après l'avoir lu.
+
+L'avancement vient des titres que vous avez affichés : un gros projet dont un seul fichier a été ouvert dit « partiel », et un projet jamais affiché dit « Inconnu ». Un dossier disparu reste listé comme introuvable (disque ou dossier synchronisé absent) ; **Retirer du registre**, ou `glose home --forget CHEMIN`, le retire sans toucher au dossier. `glose home --list` donne la même vue dans le terminal. WSL et Windows ont chacun leur registre.
+
+**Dans OpenCode**, une commande `/projets` donne la même vue, sans quitter la session. Elle vit dans votre configuration, pas dans Glose : `~/.config/opencode/commands/projets.md` :
+
+```markdown
+---
+description: Vue d'ensemble des projets Glose (qui a la main, annotations, échéances)
+---
+
+Résultat de `glose home --json` :
+
+!`glose home --json 2>&1; echo "code de sortie : $?"`
+
+Présente ces projets en un tableau court, dans l'ordre reçu : titre, type, statut,
+à qui est la main, annotations, avancement, échéance, prochaine action. Signale à part
+ceux dont `state` n'est pas `ok`, avec leur `message`. Termine par une ligne sur `totals`.
+N'exécute aucune autre commande : cette vue ne décide rien et ne remet aucun tour.
+```
+
+Cette sortie ne contient jamais de jeton : elle ne permet pas d'ouvrir une session à votre place. `glose home` est refusé si `GLOSE_AGENT` est posé : un agent lancé par Glose travaille sur son projet, sans voir les autres.
+
+**Ce que vous dites d'un projet.** La clé `project` de `glose.json` garde son type, son statut, son échéance et la prochaine action : `glose project --status review --deadline 2026-12-31 --next-action "Relire la partie 2"`. Seules ces valeurs changent dans le fichier, le reste garde ses octets. Ce fichier est suivi dans le dépôt du texte : ces valeurs s'y voient si le dépôt est public, et chaque changement y fait une différence à commiter.
+
+**Partir d'un gabarit.** `glose init --type article` recopie d'abord le dossier `gabarits/article/` de votre configuration (à côté de `agents.json`) : son arborescence, son `glose.json` (clés `project` et `agent` comprises), ses consignes. Rien n'est écrasé, et ce qui est sauté est dit. Sans gabarit de ce nom, la commande liste ceux qui existent. Glose n'en fournit aucun : ils sont à vous.
+
 ## 2. Le déroulement d'une navette
 
 Une navette est une suite de tours. La main est d'abord à l'auteur.
 
-**L'écran.** En haut, une barre qui reste visible quand on fait défiler : le titre de l'ouvrage ; la capsule de la navette, au centre : son petit curseur montre à qui est la main (vert, à vous ; gris ardoise, l'agent), avec le tour et ce que vous allez remettre ; un clic ouvre la remise (ou la reprise de la main) ; à droite, les trois vues, Annuler, Rétablir et les réglages d'affichage, puis le champ **Rechercher**. À gauche, la colonne à onglets ; au centre, le texte ; à droite, les annotations en marge. Le pied de page donne l'état du rendu et le bouton **Brouillons**.
+**L'écran.** En haut, le livre ouvert et **Glose** ramènent aux projets ; le fil d’Ariane donne le titre de l’ouvrage, puis le tour, le nombre d’annotations ouvertes et **Affichage**. Dessous, le **bandeau de la navette** montre la main (jeton vert pour l’auteur, ardoise pour l’agent), l’état de l’agent et les commentaires, suggestions et réponses de ce tour ; **Remettre à l’agent** ou **Reprendre la main** ouvre la boîte correspondante. Le bandeau devient ambre quand personne n’écoute. La barre d’outils réunit **Modifications**, **Actuel**, **Proposé** (touches 1 à 3), Annuler, Rétablir, **Rechercher** (Ctrl+Maj+F) et le pourcentage de sections affichées relues. Après 80 pixels de défilement, ces trois barres deviennent une ligne compacte de 48 pixels ; la loupe rouvre la recherche. À gauche, la colonne à onglets ; au centre, le texte ; à droite, les annotations en marge. Le pied de page donne l’état du rendu et le bouton **Brouillons**.
 
 **Votre tour.** Dans le navigateur :
 - sélectionnez un passage, puis **Commenter** (C) ou **Suggérer** (S) ; la poignée de la marge gauche agit sur un paragraphe entier, le menu « + » ajoute un élément avant ou après ;
 - chaque geste est écrit aussitôt dans le fichier, en CriticMarkup, avec son identité ;
+- un long commentaire se déplie quand vous cliquez dessus et se replie dès que vous cliquez ailleurs ; cliquer dedans pendant que vous le lisez ne fait pas bouger la page ;
+- sur une carte, chaque message porte le nom et la couleur de qui l'a écrit : vert pour vous, bleu pour l'agent ; le gras et l'italique des messages y sont affichés ;
+- dans l'onglet **Annotations**, une pastille dit où en est chacune (À remettre, À décider, Sans réponse, Répondu par…), et **Traitées**, sous la liste, garde ce que vous avez accepté, rejeté, résolu ou retiré ; un clic en ouvre l'archive ;
 - tant que vous n'avez pas remis votre tour, vos commentaires et vos réponses se modifient (**Modifier** sur la carte, ou au bout de la réponse) ou se retirent ; vos propositions se modifient tant qu'elles sont en attente ; une fois remis, on répond dans le fil ;
 - Ctrl+Z et Ctrl+Y annulent et rétablissent vos derniers gestes ;
+- la touche + ouvre le menu de la poignée, sur le paragraphe sélectionné ou le premier de l'écran : Ajouter avant, Commenter, Suggérer, Ajouter après, aux flèches ;
 - J et K passent d'une annotation à l'autre ; A accepte, X rejette, R répond, E modifie votre proposition ou votre commentaire pas encore remis ;
 - quand vous avez fini, **Remettre à l'agent**, avec un message si vous voulez.
+
+**Commenter et suggérer.** Le panneau **Commenter** s'ouvre en marge droite à hauteur du passage : le texte reste lisible et défilable. **Ajouter** (Ctrl+Entrée) enregistre la remarque ; **Annuler**, la croix ou Échap ferment le panneau en conservant le brouillon. Le focus revient au point de départ, ou au texte. Une saisie en cours doit être fermée avant d'en ouvrir une autre.
+
+Le panneau **Suggérer** se place sous le passage quand la place suffit, sinon dans une marge droite élargie. Les onglets **Mis en forme**, **Source** et **Aperçu**, la barre d'outils (Ctrl+B, Ctrl+I), les propositions qui seront créées, **Une seule proposition**, le message et **Réponse par** restent disponibles. Le contenu défile dans le panneau ; **Annuler** et **Ajouter la suggestion** restent en bas. Les touches d'une composition IME appartiennent à la méthode de saisie, y compris Échap et Ctrl+Entrée.
+
+**Exporter en PDF.** Le bouton après Annuler et Rétablir ouvre un petit panneau : **Modifications apparentes** (avec les commentaires en marge, si la case reste cochée), **Actuel** ou **Proposé**. Glose exporte ce qui est affiché : pour une seule partie d'un gros projet, choisissez-la d'abord dans le sommaire. **Exporter** ouvre la fenêtre d'impression : choisissez « Enregistrer au format PDF ». Sous Chrome et Edge, décochez une fois « En-têtes et pieds de page », qui ajouterait l'adresse de la page ; les numéros de page restent. Sous Firefox, la page est numérotée par sa propre fenêtre d'impression. Ctrl+P donne la vue affichée avec ses commentaires. L'écran revient ensuite tel qu'il était, et rien n'est écrit dans vos fichiers.
+
+**Affichage** ouvre un petit panneau sous son bouton : police, taille, interligne, largeur, justification, thème et retour aux réglages par défaut. **Réglages**, dans le menu de l'accueil et de la page Agents, offre les mêmes choix avec un aperçu de chaque thème. **Revenir au texte**, en haut de ce menu, vous ramène à l'endroit où vous étiez. La page `/set` reprend la navigation et les champs de l'accueil ; **Vos projets** ramène à la bibliothèque.
 
 **Le tour de l'agent.** Il attend votre remise (`glose wait`), lit les annotations (`glose list --json`), répond, propose ou modifie librement les fichiers, puis remet son tour (`glose done`). Ses modifications libres deviennent des propositions mot à mot ; seule une réécriture faite par `glose propose --whole` devient une proposition unique, à accepter ou rejeter en bloc. Pendant ce tour, vous lisez mais n'écrivez pas : la barre du haut le rappelle.
 
 **Décider.** Les propositions de l'agent apparaissent en marge. Vous les acceptez, les rejetez, ou répondez dans leur fil. **L'agent ne décide jamais** : aucune commande ne lui permet d'accepter, de rejeter ou de résoudre. La navette s'achève quand il ne reste plus d'annotation.
 
-**Suivre.** La colonne de gauche a quatre onglets, en icônes (leur nom s'affiche dessous et au survol ; Alt+1 à Alt+4 au clavier) : Sommaire (avec l'avancement de la relecture, que vous marquez titre par titre), Fichiers (l'arbre du projet : un clic sur un fichier ou un dossier n'affiche que lui ; un gros projet s'ouvre sur son premier fichier), Annotations (filtrables ; celles d'un fichier non affiché sont en italique, un clic l'affiche) et Navette (la frise des tours). Le bouton en haut de la colonne (ou Alt+0) la replie : un rail étroit reste à gauche pour la rouvrir ou aller droit à un onglet. `glose log` donne la même histoire en ligne de commande.
+**Suivre.** La colonne de gauche a quatre onglets, en icônes (leur nom s'affiche dessous et au survol ; Alt+1 à Alt+4 au clavier) : Sommaire (avec l'avancement de la relecture, que vous marquez titre par titre), Fichiers (l'arbre du projet : un clic sur un fichier ou un dossier n'affiche que lui ; un gros projet s'ouvre sur son premier fichier), Annotations (filtrables ; celles d'un fichier non affiché sont en italique, un clic l'affiche) et Navette (la frise des tours, en deux couloirs **Vous** et **Agent**, avec la première main à l’auteur, les anneaux, les remises et les archives). Quand une partie seule est affichée, l’onglet Fichiers rappelle son nombre de fichiers et son avancement ; la recherche et les comptes d’annotations portent toujours sur le projet. Le bouton en haut de la colonne (ou Alt+0) la replie : un rail étroit reste à gauche pour la rouvrir ou aller droit à un onglet. `glose log` donne la même histoire en ligne de commande.
 
 ## 2 bis. Les agents : qui répond, et comment le lancer
 
 Glose ne parle à aucun modèle lui-même (D-47) : il travaille avec un **agent en ligne de commande** (Claude Code, Codex, OpenCode), qui garde sa propre connexion et ses outils (MCP, skills). Deux façons de mener le tour de l'agent :
 
-- **Glose lance l'agent à la remise** (D-46). Lancez une fois `glose set` : une page s'ouvre (réglages **généraux**, valables pour tous vos projets). Elle montre les agents installés et vous fait choisir des **noms courts** : un nom pour un couple agent + modèle (« Sol » : Codex avec tel modèle ; « Lex » : OpenCode avec tel autre), et celui **par défaut**. Les modèles proposés viennent de l'agent quand il en donne la liste (`codex debug models`, `opencode models`) ; sinon, saisie libre. **Essayer** lance l'agent à blanc (il liste ses outils et lit `glose status`, sans rien écrire ; cela consomme des jetons). Tant que rien n'est réglé, la capsule et `glose open`, `status`, `doctor` disent « Aucun agent configuré » et mènent à `glose set`. Ensuite, la boîte de remise propose **Lancer Sol à la remise** (cochée quand aucun agent n'écoute) : l'agent travaille seul, dans le dossier du projet, avec des permissions réduites (lancer `glose`, lire et écrire les fichiers du texte), puis remet la main par `glose done`. La capsule dit « Sol travaille » ; son menu (la flèche à côté) permet de **voir ce qu'il fait** (sa sortie, gardée dans `.glose/agent/tour-N.log`), de l'**arrêter**, ou de le **relancer** s'il s'est arrêté sans remettre. Un tour dure 30 minutes au plus (réglable dans `glose set`).
-- **Vous menez déjà une session d'agent** (Claude Code ou OpenCode ouvert à côté). Menu de la capsule, **Lier un agent** : copiez la consigne et collez-la telle quelle dans la session. Elle contient un code court (dix minutes pour lier) et la commande `glose join CODE --agent "Sol"`, au nom de l'agent du texte ou par défaut. Cette commande attend votre remise ; au bout de 90 s, elle se termine par « délai écoulé » et l'agent la relance ; quand la main vient, elle lui donne les consignes du tour, puis il la relance pour le tour suivant. La capsule montre « Sol attend », avec le modèle quand il est connu (lu chez OpenCode, déclaré par `--model` sinon). Si la session a cessé de relancer la commande, la capsule dit « Sol est lié mais n'attend pas » : demandez-lui de la relancer. Pendant qu'un agent lancé par Glose travaille, une session liée attend la remise suivante.
+- **Glose lance l'agent à la remise** (D-46). Lancez une fois `glose set` : une page s'ouvre (réglages **généraux**, valables pour tous vos projets). Elle montre les agents installés et vous fait choisir des **noms courts** : un nom pour un couple agent + modèle (« Sol » : Codex avec tel modèle ; « Lex » : OpenCode avec tel autre), et celui **par défaut**. Les modèles proposés viennent de l'agent quand il en donne la liste (`codex debug models`, `opencode models`) ; sinon, saisie libre. **Essayer** lance l'agent à blanc (il liste ses outils et lit `glose status`, sans rien écrire ; cela consomme des jetons). Tant que rien n'est réglé, le bandeau de la navette et `glose open`, `status`, `doctor` disent « Aucun agent configuré » et mènent à `glose set`. Ensuite, la boîte de remise propose **Lancer Sol à la remise** (cochée quand aucun agent n'écoute) : l'agent travaille seul, dans le dossier du projet, avec des permissions réduites (lancer `glose`, lire et écrire les fichiers du texte), puis remet la main par `glose done`. Le bandeau de la navette dit « Sol travaille » ; son menu (la flèche à côté) permet de **voir ce qu'il fait** (sa sortie, gardée dans `.glose/agent/tour-N.log`), de l'**arrêter**, ou de le **relancer** s'il s'est arrêté sans remettre. Un tour dure 30 minutes au plus (réglable dans `glose set`).
+- **Vous menez déjà une session d'agent** (Claude Code ou OpenCode ouvert à côté). Menu du bandeau de la navette, **Lier un agent** : copiez la consigne et collez-la telle quelle dans la session. Elle contient un code court (dix minutes pour lier) et la commande `glose join CODE --agent "Sol"`, au nom de l'agent du texte ou par défaut. Cette commande attend votre remise ; au bout de 90 s, elle se termine par « délai écoulé » et l'agent la relance ; quand la main vient, elle lui donne les consignes du tour, puis il la relance pour le tour suivant. Le bandeau de la navette montre « Sol attend », avec le modèle quand il est connu (lu chez OpenCode, déclaré par `--model` sinon). Si la session a cessé de relancer la commande, le bandeau de la navette dit « Sol est lié mais n'attend pas » : demandez-lui de la relancer. Pendant qu'un agent lancé par Glose travaille, une session liée attend la remise suivante.
 
-**Qui écoute ?** La capsule le dit : « Sol attend » (un agent est en `glose wait`), « Sol a pris la main », « Sol travaille · 2 réponses », ou, en orange, « Aucun agent à l'écoute » (personne : la main restera à l'agent jusqu'à ce qu'un agent la prenne ; vous pouvez la reprendre). Les agents donnent leur nom par `--agent NOM` ou la variable `GLOSE_AGENT` (la section « Navette Glose » le leur demande).
+**Qui écoute ?** Le bandeau de la navette le dit : « Sol attend » (un agent est en `glose wait`), « Sol a pris la main », « Sol travaille · 2 réponses », ou, en orange, « Aucun agent à l'écoute » (personne : la main restera à l'agent jusqu'à ce qu'un agent la prenne ; vous pouvez la reprendre). Les agents donnent leur nom par `--agent NOM` ou la variable `GLOSE_AGENT` (la section « Navette Glose » le leur demande).
 
 **Choisir l'agent par annotation.** Dans les panneaux Commenter et Suggérer, **Réponse par** choisit le nom court qui répondra (affiché dès que vous en avez deux) ; écrire « @Luna » en tête du texte fait de même. La carte montre « → Luna ». À la remise, Glose fait **un passage par destinataire**, l'un après l'autre : chacun ne voit que ses annotations ; après le dernier, Glose rend lui-même la main, avec une note qui réunit celles de chacun. Les réponses et propositions portent le nom de l'agent qui les a écrites. Une session liée répond aux annotations sans destinataire et à celles adressées à son nom, pendant que Glose lance les autres.
 
@@ -63,7 +106,7 @@ Glose ne parle à aucun modèle lui-même (D-47) : il travaille avec un **agent 
 | `.glose/progression.json` | l'avancement de la relecture, titre par titre | non |
 | `.glose/cache/` | le rendu de chaque fichier, pour rouvrir un gros texte sans tout relire (512 Mo au plus) | non : effaçable à tout moment, il se reconstruit |
 | `.glose/server.json`, `server.lock`, `server.log`, `lock` | serveur en cours, verrous, sortie du serveur | non |
-| `.glose/agent.json` | le dernier signe de vie de l'agent (son nom, ce qu'il fait, quand) : la capsule dit qui écoute | non : il se perd sans dommage |
+| `.glose/agent.json` | le dernier signe de vie de l'agent (son nom, ce qu'il fait, quand) : le bandeau de la navette dit qui écoute | non : il se perd sans dommage |
 | `.glose/agent/` | la sortie des agents lancés par Glose (`tour-N.log`) | non |
 | `.glose/passes.json`, `.glose/owner.json` | les passages d'un tour à plusieurs destinataires ; qui mène le tour de l'agent en cours (agent lancé ou session liée) | non |
 | `.glose/link.json` | le code de liaison en cours (dix minutes) | non |
@@ -120,7 +163,7 @@ glose doctor      # installation et projet, avec la correction de chaque problè
 
 ## 6. Retrouver ses brouillons
 
-Un commentaire, une réponse ou une réécriture que vous n'avez pas encore enregistrés sont gardés dans `.glose/brouillons/`, même si vous fermez le panneau, rechargez la page, ou fermez et rouvrez Glose (sur un autre port). Le bouton **Brouillons** de la barre les liste, même pendant le tour de l'agent.
+Un commentaire, une réponse ou une réécriture que vous n'avez pas encore enregistrés sont gardés dans `.glose/brouillons/`, même si vous fermez le panneau, rechargez la page, ou fermez et rouvrez Glose (sur un autre port). Le bouton **Brouillons** du pied de page ouvre leur panneau à droite, même pendant le tour de l'agent. Chaque carte permet de reprendre, abandonner, réessayer la sauvegarde ou copier le texte et son message.
 
 - Attendez l'indication « Brouillon sauvegardé dans le projet » : c'est elle qui garantit la récupération après un redémarrage du serveur. Avant, seule une copie de secours du navigateur existe, liée à l'adresse (donc au port).
 - **Reprendre** rouvre le panneau, si la main est à vous et si le fichier n'a pas changé depuis.

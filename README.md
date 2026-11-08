@@ -43,6 +43,10 @@ glose open notes.md         # a single file
 glose init                  # glose.json profile and a "Navette Glose" section for the agent (AGENTS.md or CLAUDE.md)
 glose set                   # agent settings, for all projects: installed agents, short names (agent + model), default agent
 glose set --list            # the same, printed, without the browser
+glose home                  # your projects: whose hand, annotations, progress, deadline; a click opens one
+glose home --list           # the same, printed (--json: stable keys, never a token)
+glose project --status review --deadline 2026-12-31  # says something of the project, in glose.json, keeping every other byte
+glose init --type article   # starts from your template gabarits/article/ (configuration directory), overwriting nothing
 glose help profile          # the glose.json profile: files, directories, patterns, display filter
 glose status                # whose turn it is, how many annotations, which problems
 glose list                  # the annotations, as file:line:column; --json for an agent
@@ -55,7 +59,7 @@ glose stop                  # stops the server
 
 ### In the browser
 
-A sticky top bar holds the title, the hand-over capsule (who has the hand, the round, what you are about to hand over; a click hands over or takes the hand back), then, on the right, the three views, undo, redo and display settings, and the search field.
+A sticky top bar holds the title, the hand-over banner (who has the hand, the round, what you are about to hand over; a click hands over or takes the hand back), then, on the right, the three views, undo, redo and display settings, and the search field.
 
 Select a passage, then **Commenter** (comment, `C`) or **Suggérer** (suggest, `S`); the handle in the left margin acts on a whole paragraph. Each annotation is written to the file at once, as CriticMarkup, with its own identifier. The cards in the margin show the thread (author and agent) and the decisions: accept, reject, resolve, or accept everything in a file. Undo and redo (`Ctrl+Z`, `Ctrl+Y`) apply to your latest actions.
 
@@ -89,7 +93,7 @@ glose join CODE --agent Sol # binds an agent session already open elsewhere, the
 
 - **`glose set`** lists the installed agents, lets you name agent + model pairs with short names (« Sol » = Codex with a given model) and choose the default one. **Essayer** (try) runs an agent dry, without writing anything. Until an agent is configured, the interface and `glose open`, `status`, `doctor` say so.
 - **Launch at hand-over.** When you hand over, Glose can launch the agent itself: non-interactive, in the project directory, with reduced permissions (run `glose`, read and write the text), one at a time, with a time limit. The capsule menu shows its output, stops it, or launches it again.
-- **Bind a session.** « Lier un agent » (capsule menu) gives an instruction ready to paste into an agent session, with a short code. `glose join` binds the session and waits for your hand-over; when it ends with « délai écoulé » (timeout), the agent runs the same command again, and again for every following turn. The capsule shows who listens, with the model when known.
+- **Bind a session.** « Lier un agent » (menu of the hand-over banner) gives an instruction ready to paste into an agent session, with a short code. `glose join` binds the session and waits for your hand-over; when it ends with « délai écoulé » (timeout), the agent runs the same command again, and again for every following turn. The capsule shows who listens, with the model when known.
 - **One agent per annotation.** An annotation may name the agent that must answer (« Réponse par », or `@Name` at the start of the text). Glose then runs one pass per agent, in sequence, and hands the turn back itself; every reply is signed with the agent's name and model.
 - A text may ask for its own agent, instructions and required tools in its `glose.json` (key `agent`, see `glose help profile`).
 
@@ -120,4 +124,4 @@ Development checks: `./scripts/check.sh` (formatting, static analysis, tests, Wi
 
 Glose is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License, version 3 or (at your option) any later version. See `LICENSE`.
 
-Icons come from [Lucide](https://lucide.dev) (ISC license, notice reproduced in `web/icones.js`).
+Icons come from [Lucide](https://lucide.dev) (ISC license, notice reproduced in `web/icones.js`). The fonts Inter and Source Serif 4 are embedded in the executable (SIL Open Font License 1.1, texts in `web/polices/`).

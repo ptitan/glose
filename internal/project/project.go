@@ -26,6 +26,13 @@ var ErrNoMarkdown = errors.New("aucun fichier Markdown")
 // lock, later the journal).
 const StateDir = ".glose"
 
+// ProgressFile is the file of the state directory that keeps the progress of
+// the review (SPEC F2 quinquies).
+const ProgressFile = "progression.json"
+
+// ProgressRead is the status of a section marked as read in that file.
+const ProgressRead = "relue"
+
 // Profile is the content of glose.json. Every field is optional.
 type Profile struct {
 	Title     string   `json:"title"`
@@ -43,6 +50,9 @@ type Profile struct {
 	// instructions of its own, and the tools it requires. Never a path nor
 	// a key: the repository may be public.
 	Agent *AgentProfile `json:"agent"`
+	// Project is what the author says of the project (D-51): read leniently
+	// by parseMeta, an invalid value never prevents opening the text.
+	Project json.RawMessage `json:"project"`
 }
 
 // AgentProfile is the key « agent » of glose.json.
@@ -90,6 +100,9 @@ type Project struct {
 	PerFile   bool         // HTML made file by file: no filter, or filterPerFile
 	Profiled  bool         // true if glose.json exists
 	Agent     AgentProfile // key « agent » of the profile (P10.3)
+	Meta      Meta         // key « project » of the profile, its valid values (D-51)
+	// MetaWarnings says what was left out of the key « project ».
+	MetaWarnings []string
 	// Focus is the part of the project asked for when a path inside it was
 	// given (« livre-1/ » or « livre-1/01.md »), or "" (D-35): the navette
 	// covers the whole project; the interface and « glose list » start there.
@@ -178,6 +191,45 @@ func Load(path string) (*Project, error) {
 	return load(root, rel)
 }
 
+// parseProfile reads the content of a profile; an unknown key is refused.
+func parseProfile(raw []byte) (Profile, error) {
+	var prof Profile
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	err := dec.Decode(&prof)
+	return prof, err
+}
+
+// CheckProfile tells whether raw can serve as a profile: its keys and those of
+// its key « agent ». The paths are checked when a project is loaded.
+func CheckProfile(raw []byte) error {
+	prof, err := parseProfile(raw)
+	if err != nil {
+		return err
+	}
+	if prof.Agent != nil {
+		return prof.Agent.check()
+	}
+	return nil
+}
+
+// ReadAgent returns the key « agent » of the profile of the directory root,
+// without loading the project: one without any text yet does not load.
+func ReadAgent(root string) (AgentProfile, error) {
+	raw, err := os.ReadFile(filepath.Join(root, ProfileName))
+	if err != nil {
+		return AgentProfile{}, err
+	}
+	prof, err := parseProfile(raw)
+	if err != nil {
+		return AgentProfile{}, err
+	}
+	if prof.Agent == nil {
+		return AgentProfile{}, nil
+	}
+	return *prof.Agent, prof.Agent.check()
+}
+
 // load reads the project of the directory root; with single (a path
 // relative to root), the project is that file alone.
 func load(root, single string) (*Project, error) {
@@ -189,9 +241,7 @@ func load(root, single string) (*Project, error) {
 	raw, err := os.ReadFile(filepath.Join(root, ProfileName))
 	switch {
 	case err == nil:
-		dec := json.NewDecoder(bytes.NewReader(raw))
-		dec.DisallowUnknownFields()
-		if err := dec.Decode(&prof); err != nil {
+		if prof, err = parseProfile(raw); err != nil {
 			return nil, fmt.Errorf("%s illisible : %w", ProfileName, err)
 		}
 		p.Profiled = true
@@ -207,6 +257,7 @@ func load(root, single string) (*Project, error) {
 		}
 		p.Agent = *prof.Agent
 	}
+	p.Meta, p.MetaWarnings = parseMeta(prof.Project)
 	if prof.Pandoc != "" {
 		p.Pandoc = prof.Pandoc
 	}

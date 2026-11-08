@@ -80,6 +80,19 @@ func mkdirDurable(dir string) error {
 	return nil
 }
 
+// EnsureDir creates the directory dir, with permissions perm, and flushes its
+// parent. Its parent must exist. It is for the directories of a text (a
+// template copied in a project); those of Glose's state come with their files.
+func EnsureDir(dir string, perm os.FileMode) error {
+	if err := os.Mkdir(dir, perm); err != nil {
+		return err
+	}
+	if err := SyncDir(filepath.Dir(dir)); err != nil {
+		return fmt.Errorf("%w : %v", ErrNotSynced, err)
+	}
+	return nil
+}
+
 // writeTemp writes data to a new temporary file of dir, flushed to disk and
 // closed, with permissions perm. It returns its name; on error, nothing is
 // left behind.
@@ -119,7 +132,7 @@ func WriteAtomic(path string, data []byte, perm os.FileMode) error {
 	if err != nil {
 		return err
 	}
-	if err := os.Rename(name, path); err != nil {
+	if err := renameFile(name, path); err != nil {
 		os.Remove(name)
 		return err
 	}
@@ -157,7 +170,7 @@ func CreateAtomic(path string, data []byte, perm os.FileMode) error {
 		}
 	}
 	if err == nil {
-		err = os.Rename(name, path)
+		err = renameFile(name, path)
 	}
 	if err != nil {
 		os.Remove(name)
@@ -268,7 +281,7 @@ func WriteCache(path string, data []byte) error {
 		err = cerr
 	}
 	if err == nil {
-		err = os.Rename(name, path)
+		err = renameFile(name, path)
 	}
 	if err != nil {
 		os.Remove(name)

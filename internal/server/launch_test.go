@@ -240,7 +240,13 @@ func TestOrphanIdentityAndDeadline(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("orphelin au-delà de son échéance non arrêté")
 	}
-	for end := time.Now().Add(5 * time.Second); navette.ReadPresence(s.P.State()).Launched; time.Sleep(20 * time.Millisecond) {
+	// Under Windows, the file cannot be read while it is being replaced: a
+	// reading may give nothing.
+	launched := func() bool {
+		p := navette.ReadPresence(s.P.State())
+		return p == nil || p.Launched
+	}
+	for end := time.Now().Add(5 * time.Second); launched(); time.Sleep(20 * time.Millisecond) {
 		if time.Now().After(end) {
 			t.Fatalf("présence non effacée : %+v", navette.ReadPresence(s.P.State()))
 		}

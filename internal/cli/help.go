@@ -26,8 +26,8 @@ profil : les fichiers de la racine, puis chaque sous-dossier, à trier.
     "title": "Économie sociale et solidaire",
     "files": ["introduction.md", "chapitres/", "annexes/*.md"],
     "exclude": ["chapitres/brouillons"],
-    "filter": "github.com/ptitan/glose/rendu.lua",
-    "css": "github.com/ptitan/glose/rendu.css",
+    "filter": "glose/rendu.lua",
+    "css": "glose/rendu.css",
     "resources": ["img"]
   }
 
@@ -49,8 +49,8 @@ profil : les fichiers de la racine, puis chaque sous-dossier, à trier.
   agent      ce que ce texte demande à l'agent (lot P10), par exemple :
                "agent": {
                  "alias": "Sol",
-                 "instructions": "Vérifie chaque référence avec LexHarness.",
-                 "requires": ["mcp:lexharness", "skill:juriste-fr"]
+                 "instructions": "Vérifie chaque référence citée.",
+                 "requires": ["mcp:bibliographie", "skill:relecture"]
                }
              alias : un nom court des réglages généraux (glose set) ;
              inconnu sur la machine, le nom court par défaut est pris ;
@@ -59,6 +59,22 @@ profil : les fichiers de la racine, puis chaque sous-dossier, à trier.
              requires : outils que l'agent doit déclarer, « mcp:NOM » ou
              « skill:NOM ». Jamais de chemin ni de clé : le dépôt peut être
              public ; l'agent garde sa propre configuration.
+  project    ce que vous dites du projet, montré par « glose home » ; à changer
+             par « glose project » (une version antérieure de Glose refuse un
+             profil qui porte cette clé) :
+               "project": {
+                 "type": "article",
+                 "status": "review",
+                 "deadline": "2026-12-31",
+                 "nextAction": "Vérifier les références"
+               }
+             type : texte libre (40 caractères au plus) ; status : draft,
+             active, review, done ou archived (done sert à trier, il ne clôt
+             rien) ; deadline : AAAA-MM-JJ ; nextAction : une ligne de 200
+             caractères au plus. Ces quatre clés seulement, ni chemin ni clé
+             d'accès : le dépôt peut être public. Une valeur invalide est
+             ignorée avec un avertissement (glose doctor) et n'empêche jamais
+             d'ouvrir le texte.
 
 Les entrées de « files » et de « exclude »
 

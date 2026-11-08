@@ -18,7 +18,7 @@ BASE = "https://raw.githubusercontent.com/lucide-icons/lucide/%s/" % VERSION
 ICONES = {
     "relecture": "file-diff", "actuel": "file-text", "propose": "file-check",
     "annuler": "undo-2", "retablir": "redo-2", "reglages": "a-large-small",
-    "remettre": "send", "reprendre": "log-in",
+    "remettre": "send", "reprendre": "log-in", "exporter": "file-down",
     "lien": "link", "note": "superscript", "tableau": "table", "liste": "list",
     "repondre": "reply", "corriger": "pencil", "rejeter": "x", "accepter": "check",
     "retirer": "trash", "resoudre": "circle-check",
@@ -35,6 +35,9 @@ ICONES = {
     "brouillons": "notebook-pen", "vous": "user", "agent": "sparkles",
     "menu-capsule": "chevron-down", "copier": "copy", "arreter": "circle-stop", "sortie": "terminal",
     "configurer": "settings", "essayer": "play", "rafraichir": "refresh-cw",
+    "accueil": "house", "calendrier": "calendar", "activite": "activity", "points": "ellipsis",
+    "fleche": "arrow-right", "retour": "arrow-left", "horloge": "clock", "debranche": "unplug",
+    "introuvable": "folder-x", "archive": "archive", "tri": "arrow-up-down", "clair": "sun", "sombre": "moon",
 }
 
 # Éléments colorés : (icône, tracé exact) -> classe.

@@ -1,0 +1,80 @@
+/* Export to PDF and printing (D-55). Paper is laid out here, not in style.css. */
+
+/* ---------- The panel, on screen ---------- */
+#export { position: absolute; top: calc(100% + 8px); left: 0; z-index: 40; width: min(300px, calc(100vw - 24px)); padding: var(--esp-3); display: flex; flex-direction: column; gap: var(--esp-3);
+  background: var(--carte); border: 1px solid var(--filet); border-radius: var(--rayon-panneau); box-shadow: var(--ombre-forte); font-size: var(--texte-sm); color: var(--encre); }
+#export[hidden] { display: none; }
+#export h2 { margin: 0; font-size: var(--texte-md); }
+#export fieldset { margin: 0; padding: 0; border: 0; display: flex; flex-direction: column; gap: var(--esp-1); }
+#export legend { padding: 0 0 var(--esp-1); font-weight: 550; }
+#export label { display: flex; align-items: center; gap: 0.45rem; }
+#export label[hidden] { display: none; }
+#export input { accent-color: var(--accent); margin: 0; }
+#export p { margin: 0; color: var(--discret); }
+#export-ok { align-self: flex-start; }
+@media (max-width: 800px) { #export { position: fixed; top: calc(var(--haut-barre) + 8px); left: 12px; } }
+
+.export-copie { display: none; }
+
+/* ---------- On paper ---------- */
+@page {
+  size: A4;
+  margin: 18mm 12mm 18mm 14mm;
+  @bottom-center { content: counter(page) " / " counter(pages); font: 8.5pt "Inter", system-ui, sans-serif; color: #5c666b; }
+}
+
+@media print {
+  /* Paper is white whatever the theme of the screen. */
+  :root, :root[data-theme] { color-scheme: light !important; }
+  html, body { background: #fff !important; }
+
+  #reserve-barres, #cote, #barre, #rail, #pied, #marge, #outils-bloc, #reglages, #export, #menu-selection, #avis,
+  #annotations-ouvrir, #annotations-fermer, dialog, .infobulle, .guide-colonne { display: none !important; }
+
+  #app, #centre, #page { display: block !important; width: auto !important; max-width: none !important; min-height: 0 !important; height: auto !important;
+    margin: 0 !important; padding: 0 !important; overflow: visible !important; }
+  #texte { width: auto !important; max-width: 160mm !important; margin: 0 auto !important; padding: 0 !important; border: 0 !important; background: none !important;
+    box-shadow: none !important; overflow: visible !important; font-size: 10.5pt !important; line-height: 1.4 !important; }
+  #texte .rendu, .glose-file { width: auto !important; max-width: none !important; margin: 0 !important; padding: 0 !important; overflow: visible !important;
+    content-visibility: visible !important; contain: none !important; contain-intrinsic-size: none !important; }
+  #texte .rendu.garde { display: none !important; }
+  /* Paper shows its copy (export.js), not the page of the screen. */
+  body.export-impression #texte .rendu:not(.export-copie) { display: none !important; }
+  .export-copie { display: block; }
+
+  #texte h1, #texte h2, #texte h3, #texte h4 { break-after: avoid; break-inside: avoid; }
+  #texte p, #texte li { orphans: 2; widows: 2; }
+  #texte tr, #texte img, #texte figure { break-inside: avoid; }
+  #texte img { max-width: 100%; }
+  #texte pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+  /* The narrower column must not break a word to shrink a table. */
+  #texte td, #texte th { overflow-wrap: break-word !important; word-break: normal !important; }
+
+  /* A printer dialog may leave backgrounds out: the marks keep theirs. */
+  .g-hl, .g-prop, .g-barre, ins.g-ajout, .g-ancre, .note-export, .note-export .num { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .g-hl.g-actif, .g-prop.g-actif, ins.g-ajout.g-actif { box-shadow: none; }
+  #texte :is(h1, h2, h3, h4) { color: inherit; }
+
+  /* Without comments: nothing that would refer to them. */
+  body.export-impression:not(.export-marge) .g-ancre { display: none !important; }
+  body.export-impression:not(.export-marge) .g-hl { background: none; color: inherit; }
+  /* Actuel and Proposé: the text alone. */
+  body.export-sans-marques .g-prop { background: none; color: inherit; text-decoration: none; }
+
+  /* ---------- Comments in the margin ---------- */
+  body.export-marge #texte { width: 118mm !important; max-width: none !important; margin: 0 !important; }
+  .note-export { float: right; clear: right; box-sizing: border-box; width: 58mm; margin: 0 -62mm 2mm 0; padding: 0 0 0 2mm;
+    border-left: 1pt solid #c98a2b; background: none; color: #232d33; font: 400 7.8pt/1.3 "Inter", system-ui, sans-serif; text-align: left; text-indent: 0; letter-spacing: 0; list-style: none; }
+  .note-export.prop { border-left-color: #4a7c59; }
+  .note-export .tete-note { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 1.2mm; margin-bottom: 0.4mm; }
+  .note-export .num { font-weight: 600; color: #232d33; }
+  .note-export strong { font-weight: 600; }
+  .note-export .qui, .note-export .pour { color: #5c666b; }
+  .note-export .qui { font-weight: 600; }
+  .note-export .auteur .qui, .note-export .qui.auteur { color: #326346; }
+  .note-export .agent .qui, .note-export .qui.agent { color: #34576a; }
+  .note-export .message { display: block; margin: 0 0 0.6mm; padding: 0; color: inherit; font: inherit; text-indent: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+
+  .fin-export { clear: both; margin-top: 8mm; border-top: 0.5pt solid #c4c9c5; padding-top: 3mm; }
+  .fin-export .note-export { float: none; width: auto; margin: 0 0 2mm; }
+}

@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="fr" data-theme="system">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Accueil — Glose</title>
+<script src="/static/themes.js"></script>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/themes.css">
+<script src="/static/icones.js" defer></script>
+<script src="/static/espace.js" defer></script>
+<script src="/static/accueil.js" defer></script>
+</head>
+<body class="page-accueil">
+<aside class="acc-nav">
+  <a class="acc-logo" href="/home"><svg class="ic" viewBox="0 0 24 24" data-icone="a-projet" aria-hidden="true"></svg><span>Glose</span></a>
+  <nav aria-label="Navigation principale">
+    <a href="/home" aria-current="page" title="Accueil"><svg class="ic" viewBox="0 0 24 24" data-icone="accueil" aria-hidden="true"></svg><span>Accueil</span></a>
+    <a id="acc-agents" href="/set" title="Agents"><svg class="ic" viewBox="0 0 24 24" data-icone="agent" aria-hidden="true"></svg><span>Agents</span></a>
+    <button id="acc-reglages" type="button" title="Réglages"><svg class="ic" viewBox="0 0 24 24" data-icone="configurer" aria-hidden="true"></svg><span>Réglages</span></button>
+  </nav>
+  <small>Votre espace de travail local</small>
+</aside>
+<main class="acc-main">
+  <label class="acc-recherche"><svg class="ic" viewBox="0 0 24 24" data-icone="chercher" aria-hidden="true"></svg><input id="acc-recherche" type="search" aria-label="Rechercher un projet" placeholder="Rechercher un projet"></label>
+  <header class="acc-entete"><div class="acc-surtitre">Votre bibliothèque de travail</div><h1>Accueil</h1><p>Vue d'ensemble de vos projets et relectures</p></header>
+  <p id="acc-connexion" class="acc-erreur" role="alert" hidden></p>
+  <p id="acc-erreur" class="acc-erreur" role="alert" hidden></p>
+  <pre id="acc-avis" class="acc-avis" role="status" hidden></pre>
+  <div id="acc-stats" class="acc-stats"></div>
+  <p id="acc-illisibles" class="acc-discret" hidden></p>
+  <section id="acc-premier" class="acc-premier" hidden>
+    <svg class="ic" viewBox="0 0 24 24" data-icone="a-dossier" aria-hidden="true"></svg>
+    <h2>Votre premier projet commence ici</h2>
+    <p>Ouvrez un dossier Markdown avec <code>glose open</code>,<br>préparez-le avec <code>glose init</code>, ou créez un projet à partir d’un gabarit.</p>
+    <button type="button" class="acc-principal" data-nouveau>Nouveau projet</button><p>Les projets ouverts seront retrouvés ici.</p>
+  </section>
+  <section id="acc-projets" aria-labelledby="acc-titre-projets" hidden>
+    <div class="acc-tete-liste"><h2 id="acc-titre-projets">Vos projets</h2><button type="button" class="acc-principal" data-nouveau><svg class="ic" viewBox="0 0 24 24" data-icone="plus" aria-hidden="true"></svg>Nouveau projet</button></div>
+    <div class="acc-filtres"><div id="acc-types" class="acc-pilules" aria-label="Types de projets"></div><label>Statut <select id="acc-statut"><option value="">Tous les statuts</option></select></label></div>
+    <table class="acc-table"><caption class="acc-accessible">Vos projets et leur état de relecture</caption><thead><tr>
+      <th scope="col" data-tri="title"><button type="button">Projet</button></th><th scope="col" class="acc-type">Type</th>
+      <th scope="col" data-tri="status"><button type="button">Statut</button></th><th scope="col">Main</th>
+      <th scope="col" data-tri="annotations"><button type="button">Annotations</button></th><th scope="col">Progression</th>
+      <th scope="col" data-tri="deadline"><button type="button">Échéance</button></th><th scope="col" class="acc-suite">Prochaine action</th><th scope="col"><span class="acc-accessible">Actions</span></th>
+    </tr></thead><tbody id="acc-lignes"></tbody></table>
+  </section>
+</main>
+<dialog id="acc-nouveau" class="acc-dialogue" aria-labelledby="acc-nouveau-titre">
+<form id="acc-form-nouveau"><h2 id="acc-nouveau-titre">Nouveau projet</h2><p>Initialiser un dossier sans écraser ses fichiers.</p>
+<label>Chemin du dossier<input name="path" required placeholder="~/manuscrits/mon-texte" aria-describedby="acc-chemin-aide"></label><small id="acc-chemin-aide">Le dossier doit exister. Saisissez son chemin complet.</small>
+<label>Type · gabarits disponibles<select name="type"></select></label><p id="acc-gabarits" class="acc-discret"></p>
+<p class="acc-erreur" data-erreur role="alert" hidden></p><div class="acc-actions"><button type="button" data-fermer>Annuler</button><button type="submit" class="acc-principal">Créer le projet</button></div></form>
+</dialog>
+<dialog id="acc-modifier" class="acc-dialogue" aria-labelledby="acc-modifier-titre">
+<form id="acc-form-modifier"><h2 id="acc-modifier-titre">Modifier les métadonnées</h2><p id="acc-projet-modifie"></p>
+<label>Type<input name="type"></label><label>Statut<select name="status"></select></label><label>Échéance<input name="deadline" type="date"></label><label>Prochaine action<input name="nextAction"></label>
+<small>Enregistré dans le fichier glose.json du projet.</small><p class="acc-erreur" data-erreur role="alert" hidden></p><div class="acc-actions"><button type="button" data-fermer>Annuler</button><button type="submit" class="acc-principal">Enregistrer</button></div></form>
+</dialog>
+<dialog id="acc-retirer" class="acc-dialogue" aria-labelledby="acc-retirer-titre"><form id="acc-form-retirer"><h2 id="acc-retirer-titre">Retirer du registre</h2><p id="acc-projet-retire"></p><p>Seule l’inscription dans l’accueil est retirée. Le dossier et ses fichiers ne sont pas touchés.</p><p class="acc-erreur" data-erreur role="alert" hidden></p><div class="acc-actions"><button type="button" data-fermer>Annuler</button><button type="submit">Retirer du registre</button></div></form></dialog>
+</body>
+</html>

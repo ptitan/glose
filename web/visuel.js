@@ -1,29 +1,29 @@
-// Glose : éditeur mis en forme du dialogue « Suggérer ».
+// Glose: formatted editor for the "Suggérer" dialog.
 //
-// L'auteur écrit dans le texte mis en forme ; le résultat redevient du
-// Markdown, que le serveur transforme en propositions (comme en mode Source).
-// Pour ne jamais abîmer le Markdown :
-//   - seuls des paragraphes s'éditent ainsi (pas de titre, liste, tableau,
-//     bloc de code…) ;
-//   - ce que l'éditeur ne sait pas réécrire à l'identique devient un « bloc
-//     intouchable » (formule, image, code, appel de note, étiquette {#…},
-//     échappement, entité, HTML…) qui garde sa source exacte ;
-//   - à l'ouverture, la source relue puis réécrite doit être identique à
-//     l'originale, octet pour octet ; sinon, le mode n'est pas proposé.
+// The author writes in formatted text; the result becomes Markdown
+// again, which the server turns into proposals (as in Source mode).
+// To never damage Markdown:
+//   - only paragraphs can be edited this way (no heading, list, table,
+//     code block…);
+//   - anything the editor cannot rewrite identically becomes an "untouchable
+//     block" (formula, image, code, footnote reference, {#…} label,
+//     escape, entity, HTML…) retaining its exact source;
+//   - on opening, parsing and rewriting the source must yield the original,
+//     byte for byte; otherwise, the mode is not offered.
 "use strict";
 window.GloseVisuel = (() => {
-  // ---------- Lecture : Markdown → éléments ----------
-  // Un paragraphe est une suite d'éléments : texte, gras, italique, lien, et
-  // blocs intouchables. Renvoie null si le texte n'est pas fait de simples
-  // paragraphes.
-  // Début de ligne qui ouvre un bloc que l'éditeur ne traite pas.
+  // ---------- Reading: Markdown → elements ----------
+  // A paragraph is a sequence of elements: text, bold, italic, link, and
+  // untouchable blocks. Return null if the text does not consist of simple
+  // paragraphs.
+  // Line start opening a block the editor does not handle.
   const STRUCTURE = /^(#{1,6}(\s|$)|[-*+]\s|\d{1,9}[.)]\s|\||```|~~~|:::|\[\^[^\]\s]+\]:|-{3,}\s*$|\*{3,}\s*$|_{3,}\s*$|={2,}\s*$)/;
-  // Préfixe de la première ligne d'un paragraphe : marques d'encadré, puis
-  // marqueur d'élément de liste ; il devient un bloc intouchable.
+  // Prefix of a paragraph's first line: blockquote markers, then
+  // a list item marker; it becomes an untouchable block.
   const PREFIXE = /^ {0,3}(?:> ?)*(?: {0,3}(?:[-*+]|\d{1,9}[.)])[ \t]+)?/;
 
   function blocs(md) {
-    // Paragraphes et séparateurs (lignes vides), gardés tels quels.
+    // Paragraphs and separators (blank lines), kept as is.
     const parties = md.split(/(\r?\n[ \t>]*\r?\n(?:[ \t>]*\r?\n)*)/);
     const out = [];
     for (let i = 0; i < parties.length; i++) {
@@ -48,8 +48,8 @@ window.GloseVisuel = (() => {
     return s;
   }
 
-  // Cherche la fermeture d'une emphase délim (« ** », « * », « __ », « _ »)
-  // dans t à partir de i, au même niveau de crochets et hors code.
+  // Find the closing emphasis delimiter delim ("**", "*", "__", "_")
+  // in t starting at i, at the same bracket depth and outside code.
   function fermeture(t, i, delim) {
     for (let j = i; j < t.length; j++) {
       const c = t[j];
@@ -70,7 +70,7 @@ window.GloseVisuel = (() => {
     return -1;
   }
 
-  // Crochet fermant qui correspond à celui ouvert en i.
+  // Closing bracket matching the one opened at i.
   function crochet(t, i) {
     let d = 0;
     for (let j = i; j < t.length; j++) {
@@ -81,13 +81,13 @@ window.GloseVisuel = (() => {
     return -1;
   }
 
-  // Les textes lus par l'appel de lire en cours, gardés sur sa racine.
+  // Texts read by the current lire call, kept on its root.
   let textesLus = null;
 
   function enLigne(t, parent) {
     let texte = "";
-    // Chaque texte garde la source dont il vient : réécrit, ce qui n'a pas
-    // changé reprend ces octets tels quels (voir ecrireTexte).
+    // Each text retains its source: when rewritten, unchanged parts
+    // reuse those bytes as is (see ecrireTexte).
     const vider = () => {
       if (!texte) return;
       const n = document.createTextNode(texte);
@@ -165,7 +165,7 @@ window.GloseVisuel = (() => {
     vider();
   }
 
-  // Lit md dans racine (vidée). Renvoie false si le texte ne s'y prête pas.
+  // Read md into racine (emptied). Return false if the text is unsuitable.
   function lire(md, racine) {
     racine.textContent = "";
     textesLus = racine.__glose_textes = [];
@@ -185,52 +185,52 @@ window.GloseVisuel = (() => {
     return true;
   }
 
-  // ---------- Écriture : éléments → Markdown ----------
-  // Le texte tapé reste du texte (F7) : tout signe qui pourrait former une
-  // construction Markdown y est échappé (pandoc lit « \x » comme le signe x).
-  // Le texte venu de la source, lui, est repris tel quel : seule la partie
-  // changée d'un texte est échappée, ce qui garde l'aller-retour identique.
+  // ---------- Writing: elements → Markdown ----------
+  // Typed text stays text (F7): any character that could form a Markdown
+  // construct is escaped (pandoc reads "\x" as the character x).
+  // Source text is reused as is: only the changed portion
+  // of a text is escaped, preserving an identical round trip.
   function echapperNouveau(s, debutDeLigne) {
     let out = "";
     for (let i = 0; i < s.length; i++) {
       const c = s[i], reste = s.slice(i), avant = i ? s[i - 1] : "";
       let e = "\\`*_[]{}<>~^$|".includes(c);
       if (c === "&") e = /^&(#\d+|#x[0-9a-fA-F]+|[a-zA-Z]+);/.test(reste);
-      else if (c === ":") e = /^:[\w+-]+:/.test(reste); // émoji
+      else if (c === ":") e = /^:[\w+-]+:/.test(reste); // emoji
       else if (c === "@") e = /^@\w/.test(reste) && !/[\p{L}\p{N}]/u.test(avant); // citation
       out += (e ? "\\" : "") + c;
     }
-    // Début de ligne : titre, liste, encadré, définition, soulignement.
+    // Line start: heading, list, blockquote, definition, underline.
     if (debutDeLigne) {
       out = out.replace(/^( {0,3})([#+\-=:])/, "$1\\$2").replace(/^( {0,3}\d{1,9})([.)])(?=\s|$)/, "$1\\$2");
     }
     return out;
   }
 
-  // Le Markdown d'un nœud texte de l'éditeur : la partie qui diffère de sa
-  // source (tout, pour un texte nouveau) est échappée, le reste repris tel
-  // quel. La partie changée s'étend aux mots qu'elle touche : un signe tapé
-  // contre un texte gardé (« [a] » puis « (b) ») ne forme pas de construction.
-  // Un nœud que le navigateur a recréé (mot mis en gras, coupure) a perdu sa
-  // source : on la retrouve parmi les textes lus à l'ouverture.
+  // Markdown for an editor text node: the portion differing from its
+  // source (all of it for new text) is escaped; the rest is reused as
+  // is. The changed portion extends to the words it touches: a character typed
+  // next to retained text ("[a]" then "(b)") does not form a construct.
+  // A node recreated by the browser (word made bold, split) has lost its
+  // source: recover it among the texts read on opening.
   function ecrireTexte(c, opt, debutDeLigne) {
     let s = c.nodeValue;
     if (!opt.nbsp) s = s.replace(/\u00a0/g, " ");
     let src = c.__glose_src;
-    // Un nœud recréé, en début de ligne, dont le début formerait un titre ou
-    // une liste : son premier mot est toujours traité comme saisi.
+    // A recreated node at a line start whose beginning would form a heading
+    // or list: its first word is always treated as typed input.
     const debutRisque = src === undefined && debutDeLigne && echapperNouveau(s, true) !== echapperNouveau(s, false);
     if (src === undefined && s) {
       const textes = opt.textes || [];
-      // Un morceau de la source, inchangé, repris tel quel.
-      // Un morceau de la source est du texte littéral là où il était ; ce
-      // qui pourrait changer, c'est le début de ligne (debutRisque) et ses
-      // voisins, tapés, donc échappés. Vaut aussi pour un paragraphe coupé
-      // par Entrée, dont la seconde moitié est un nœud recréé.
-      // Ses deux bords doivent être des caractères ordinaires : un signe au
-      // bord (« _bar_ » pris dans « foo_bar_baz ») formerait une construction
-      // avec ses nouveaux voisins ; à l'intérieur, chaque signe garde les
-      // siens.
+      // An unchanged source fragment, reused as is.
+      // A source fragment is literal text where it was; what might
+      // change is the line start (debutRisque) and its neighbours,
+      // typed and therefore escaped. Also applies to a paragraph split
+      // by Enter, whose second half is a recreated node.
+      // Both edges must be ordinary characters: a character at an edge
+      // ("_bar_" taken from "foo_bar_baz") would form a construct
+      // with its new neighbours; inside, each character keeps
+      // its own neighbours.
       const ordinaire = (c) => echapperNouveau(c, false) === c;
       if (!debutRisque && ordinaire(s[0]) && ordinaire(s[s.length - 1]) && textes.some((t) => t.includes(s))) return s;
       let mieux = 0;
@@ -244,13 +244,13 @@ window.GloseVisuel = (() => {
     let [p, q] = communs(s, src);
     if (debutRisque) p = 0;
     if (p + q > s.length) q = s.length - p;
-    // Jusqu'aux espaces qui bordent la partie changée.
+    // Include spaces bordering the changed portion.
     while (p > 0 && !/\s/.test(s[p - 1])) p--;
     while (q > 0 && !/\s/.test(s[s.length - q])) q--;
     return s.slice(0, p) + echapperNouveau(s.slice(p, s.length - q), debutDeLigne && p === 0) + s.slice(s.length - q);
   }
 
-  // Longueurs du début et de la fin communs à s et t (sans chevauchement).
+  // Lengths of the common prefix and suffix of s and t (without overlap).
   function communs(s, t) {
     let p = 0;
     while (p < s.length && p < t.length && s[p] === t[p]) p++;
@@ -259,8 +259,8 @@ window.GloseVisuel = (() => {
     return [p, q];
   }
 
-  // Un texte commence une ligne s'il ouvre le paragraphe (après son préfixe)
-  // ou suit un saut de ligne.
+  // Text starts a line if it opens the paragraph (after its prefix)
+  // or follows a line break.
   function debutDeLigne(c) {
     let x = c.previousSibling;
     while (x && x.nodeType === Node.TEXT_NODE && x.nodeValue === "") x = x.previousSibling;
@@ -289,8 +289,8 @@ window.GloseVisuel = (() => {
     return out;
   }
 
-  // Une emphase ne peut ni commencer ni finir par une espace : les espaces
-  // passent à l'extérieur.
+  // Emphasis cannot start or end with a space: spaces
+  // move outside.
   function emphase(s, delim) {
     const m = /^(\s*)([\s\S]*?)(\s*)$/.exec(s);
     return m[1] + delim + m[2] + delim + m[3];
@@ -298,9 +298,9 @@ window.GloseVisuel = (() => {
 
   function ecrire(racine, opt) {
     opt = Object.assign({}, opt, { textes: racine.__glose_textes || [] });
-    // Paragraphes de l'éditeur ; un texte tapé hors de tout paragraphe (dans
-    // un éditeur ouvert vide, le navigateur n'en crée pas toujours) forme un
-    // paragraphe à lui seul.
+    // Editor paragraphs; text typed outside any paragraph (in an editor
+    // opened empty, the browser does not always create one) forms a
+    // paragraph of its own.
     const ps = [];
     let libre = null;
     for (const n of racine.childNodes) {
@@ -322,8 +322,8 @@ window.GloseVisuel = (() => {
     return out;
   }
 
-  // Options d'écriture tirées de l'original : marques d'emphase en usage,
-  // fin de ligne, espaces insécables.
+  // Writing options taken from the original: emphasis markers in use,
+  // line ending, non-breaking spaces.
   function options(md) {
     return {
       gras: /__\S/.test(md) && !/\*\*\S/.test(md) ? "__" : "**",
@@ -333,8 +333,8 @@ window.GloseVisuel = (() => {
     };
   }
 
-  // Ouvre md dans racine si la lecture puis l'écriture le redonnent à
-  // l'identique. Renvoie les options, ou null.
+  // Open md in racine if parsing then writing reproduces it
+  // identically. Return options, or null.
   function ouvrir(md, racine) {
     if (!lire(md, racine)) return null;
     const opt = options(md);

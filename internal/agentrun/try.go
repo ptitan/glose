@@ -136,6 +136,7 @@ func PassPrompt(name, root, instructions string, requires []string, pass bool) s
 	if len(requires) > 0 {
 		b.WriteString("Outils requis par ce texte (sers-t'en) : " + strings.Join(requires, ", ") + ".\n\n")
 	}
+	b.WriteString("Lance chaque commande `glose` seule, sans l'enchaîner à une autre (`;`, `&&`, `|`) : tes permissions n'admettent rien d'autre, et une commande composée est refusée.\n\n")
 	b.WriteString("Déroulement :\n")
 	b.WriteString("1. `glose list --json` donne les annotations à traiter.\n")
 	b.WriteString("2. Réponds par `glose reply` et propose par `glose propose` (avec `--note` pour expliquer) : préfère-les aux modifications libres des fichiers.\n")

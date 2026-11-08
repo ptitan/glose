@@ -1,6 +1,6 @@
-// Brouillons privés : une file d'écriture par saisie, versions conditionnelles
-// côté serveur. Le miroir navigateur ne contient que les envois non confirmés ;
-// le disque du projet fait foi après confirmation, même si son port change.
+// Private drafts: one write queue per input, conditional versions
+// on the server. The browser mirror only contains unconfirmed sends;
+// the project disk is authoritative after confirmation, even if its port changes.
 "use strict";
 (() => {
   const copie = (v) => JSON.parse(JSON.stringify(v));

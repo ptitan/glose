@@ -3,8 +3,10 @@
 package store
 
 import (
+	"errors"
 	"os"
 	"syscall"
+	"time"
 	"unsafe"
 )
 
@@ -42,6 +44,28 @@ func unlockFile(f *os.File) error {
 	r, _, err := procUnlockFileEx.Call(f.Fd(), 0, 1, 0, uintptr(unsafe.Pointer(&ol)))
 	if r != 0 {
 		return nil
+	}
+	return err
+}
+
+// renameFile replaces newpath by oldpath. On Windows, a file open elsewhere
+// cannot be replaced for an instant (another process, or this one, reading it):
+// the attempt is made again for a while, as the replacement itself is safe.
+func renameFile(oldpath, newpath string) error {
+	const (
+		accessDenied     = syscall.Errno(5)
+		sharingViolation = syscall.Errno(32)
+	)
+	var err error
+	for i := 0; i < 50; i++ {
+		if err = os.Rename(oldpath, newpath); err == nil {
+			return nil
+		}
+		var code syscall.Errno
+		if !errors.As(err, &code) || (code != accessDenied && code != sharingViolation) {
+			return err
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 	return err
 }

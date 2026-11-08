@@ -15,19 +15,21 @@ import (
 // user configuration (not in a project): the same everywhere, and kept from
 // one server to the next although the port changes.
 type Settings struct {
-	Font       string  `json:"font"`       // serif, georgia, sans, lisible, mono
+	Font       string  `json:"font"`       // source, libertinus, serif, georgia, sans, lisible, mono
 	Size       int     `json:"size"`       // pixels
 	LineHeight float64 `json:"lineHeight"` // multiple of the size
 	Justify    bool    `json:"justify"`    // justified text
-	Theme      string  `json:"theme"`      // system, light, dark
+	Theme      string  `json:"theme"`      // system, light, dark, or a theme of web/themes.js
 	TextWidth  int     `json:"textWidth"`  // width of the text column, in rem
 }
 
 // DefaultSettings are used when nothing has been saved.
-var DefaultSettings = Settings{Font: "serif", Size: 17, LineHeight: 1.6, Justify: false, Theme: "system", TextWidth: 44}
+var DefaultSettings = Settings{Font: "source", Size: 17, LineHeight: 1.6, Justify: false, Theme: "system", TextWidth: 44}
 
-var fonts = map[string]bool{"serif": true, "georgia": true, "sans": true, "lisible": true, "mono": true}
-var themes = map[string]bool{"system": true, "light": true, "dark": true}
+var fonts = map[string]bool{"source": true, "libertinus": true, "serif": true, "georgia": true, "sans": true, "lisible": true, "mono": true}
+var themes = map[string]bool{"system": true, "light": true, "dark": true,
+	"nord-clair": true, "catppuccin-latte": true, "rose-pine-dawn": true, "solarized-clair": true, "gruvbox-clair": true, "everforest-clair": true, "kanagawa-lotus": true,
+	"nord": true, "tokyo-night": true, "catppuccin-mocha": true, "rose-pine": true, "gruvbox": true, "everforest": true, "kanagawa": true, "solarized": true}
 
 func (st Settings) valid() bool {
 	return fonts[st.Font] && themes[st.Theme] && st.Size >= 12 && st.Size <= 30 &&

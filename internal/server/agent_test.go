@@ -174,7 +174,7 @@ func TestServeSettings(t *testing.T) {
 	urls := make(chan string, 1)
 	stop := make(chan struct{})
 	done := make(chan error, 1)
-	go func() { done <- ServeSettings(func(u string) { urls <- u }, stop) }()
+	go func() { done <- ServeSettings("/set", func(u string) { urls <- u }, stop) }()
 	u := <-urls
 	m := regexp.MustCompile(`^(http://127\.0\.0\.1:\d+)/set#t=([0-9a-f]{64})$`).FindStringSubmatch(u)
 	if m == nil {

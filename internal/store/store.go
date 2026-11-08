@@ -107,7 +107,7 @@ func WriteIfUnchanged(path, expected string, data []byte) (string, error) {
 	if err := checkHash(path, expected); err != nil {
 		return "", err
 	}
-	if err := os.Rename(tmpName, target); err != nil {
+	if err := renameFile(tmpName, target); err != nil {
 		return "", fmt.Errorf("remplacement de %s : %w", target, err)
 	}
 	done = true

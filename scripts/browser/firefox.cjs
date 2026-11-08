@@ -54,6 +54,33 @@ const scenarios = [
     assert.equal(await write('/api/comment', A), 200); await aligned('A, de nouveau');
     assert.equal((await p.read('a.md')).toString(), preface, 'premier fichier intact');
   }],
+  ['export en PDF : commentaires en marge, écran rendu tel quel (P13)', async ({ p, page }) => {
+    const A = Buffer.from(chapter).indexOf('## Première section') + Buffer.byteLength('## Première section');
+    const avant = await p.read('b.md');
+    assert.equal(await page.evaluate(async (token, pos) => {
+      const d = await (await fetch('/api/doc?part=', { headers: { 'X-Glose-Token': token } })).json();
+      const f = d.files.findIndex((x) => x.path === 'b.md');
+      const r = await fetch('/api/comment', { method: 'POST', headers: { 'X-Glose-Token': token, 'Content-Type': 'application/json', 'X-Glose-Files': String(d.filesGen) },
+        body: JSON.stringify({ file: f, hash: d.files[f].hash, mode: 'point', start: pos, end: pos, text: 'Note d’essai' }) });
+      return r.status;
+    }, p.state.token, A), 200);
+    await page.wait('carte affichée', () => !!document.querySelector('.g-ancre'));
+    const avecNote = await p.read('b.md');
+    assert.ok(!avant.equals(avecNote));
+    await page.evaluate(() => {
+      window.__imp = 0;
+      window.print = () => { window.dispatchEvent(new Event('beforeprint')); window.__imp++; };
+      document.getElementById('exporter').click();
+      document.getElementById('export-ok').click();
+    });
+    await page.wait('impression lancée', () => window.__imp > 0);
+    assert.ok(await page.evaluate(() => document.querySelectorAll('.export-copie .note-export').length === 1));
+    const pdf = await page.send('browsingContext.print', { context: page.context, page: { width: 21, height: 29.7 } });
+    assert.equal(Buffer.from(pdf.data, 'base64').subarray(0, 5).toString(), '%PDF-');
+    await page.evaluate(() => window.dispatchEvent(new Event('afterprint')));
+    await page.wait('écran rendu', () => !document.querySelector('.export-copie') && !document.body.className.includes('export-'));
+    assert.ok(avecNote.equals(await p.read('b.md')), 'exporter n’écrit rien');
+  }],
 ];
 
 if (require.main === module) test('Glose dans Firefox isolé', { timeout: 180000 }, async (t) => {

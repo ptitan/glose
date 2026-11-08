@@ -150,6 +150,9 @@ func doctor(path string) []doctorFinding {
 		proj("ok", "profil", fmt.Sprintf("pas de %s : %d fichier%s .md de %s", project.ProfileName, len(p.Files), plural(len(p.Files)), p.Root),
 			"")
 	}
+	for _, w := range p.MetaWarnings {
+		proj("warning", "métadonnées", w, "corrigez la clé project de "+project.ProfileName+" (glose help profile), ou passez par glose project")
+	}
 
 	if p.CSS != "" {
 		rel, _ := filepath.Rel(p.Root, p.CSS)

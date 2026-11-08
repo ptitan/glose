@@ -10,7 +10,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -267,5 +269,43 @@ func TestCreateAtomicRefusesAFileThatAppeared(t *testing.T) {
 	os.Remove(path)
 	if err := CreateAtomic(path, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A state file read all the time (the presence of the agent, polled by the
+// interface) is still replaced: on Windows, a reader once made the replacement
+// fail, and the write was lost (P10.13).
+func TestWriteAtomicWhileBeingRead(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "etat.json")
+	if err := WriteAtomic(path, []byte("0"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stop := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < 3; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for {
+				select {
+				case <-stop:
+					return
+				case <-time.After(time.Millisecond):
+					os.ReadFile(path)
+				}
+			}
+		}()
+	}
+	var err error
+	for i := 0; i < 300 && err == nil; i++ {
+		err = WriteAtomic(path, []byte(strconv.Itoa(i)), 0o600)
+	}
+	close(stop)
+	wg.Wait()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(path); string(b) != "299" {
+		t.Fatalf("dernière écriture perdue : %q", b)
 	}
 }

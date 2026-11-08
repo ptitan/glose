@@ -1,8 +1,8 @@
 "use strict";
-// Agents (lot P10) : le menu de la capsule de la navette et la liaison d'une
-// session d'agent à ce Glose ouvert à la main (P10.2). La liaison donne une
-// consigne prête à coller, avec un code court ; la capsule et ce panneau
-// montrent l'agent dès qu'il a donné signe de vie (glose join).
+// Agents (P10): the shuttle banner menu and linking an agent
+// session to this manually opened Glose (P10.2). Linking provides
+// a ready-to-paste instruction with a short code; the banner and this panel
+// show the agent as soon as it gives a sign of life (glose join).
 window.GloseAgents = (() => {
   function creer({ api, etat, avis, jeton, doc, recharger }) {
     const $ = (id) => document.getElementById(id);
@@ -10,7 +10,7 @@ window.GloseAgents = (() => {
     const d = $('lien'), consigne = $('lien-consigne'), statut = $('lien-etat');
     let lien = null, minuteur = 0;
 
-    // ---------- Menu de la capsule ----------
+    // ---------- Banner menu ----------
     function ouvrirMenu(ouvert) {
       menu.hidden = !ouvert;
       bouton.setAttribute('aria-expanded', String(ouvert));
@@ -30,27 +30,27 @@ window.GloseAgents = (() => {
     });
     menu.addEventListener('click', (e) => { if (e.target.closest('button')) ouvrirMenu(false); });
 
-    // ---------- Lier un agent (P10.2) ----------
+    // ---------- Link an agent (P10.2) ----------
     function restant() {
       if (!lien) return '';
       const s = Math.max(0, Math.round((new Date(lien.expires) - Date.now()) / 1000));
       return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
     }
-    // Lié : l'agent a donné ce code à glose join (et non un autre signe).
-    // Trois états distincts (audit de Codex) : le code pris par une session
-    // (link.json) prouve la liaison ; sa présence fraîche dit si elle attend
-    // vraiment ou mène le tour ; sinon, sa commande ne tourne plus.
+    // Linked: the agent gave this code to glose join (not another sign of life).
+    // Three distinct states (Codex audit): a code taken by a session
+    // (link.json) proves the link; fresh presence says whether it is actually
+    // waiting or leading the turn; otherwise, its command is no longer running.
     function majStatut() {
       if (!d.open || !lien) return;
       const D = doc(), l = D && D.link, st = etat(), a = st && st.agent;
       if (l && l.used && l.code === lien.code) {
         $('lien-reste').textContent = '';
         const n = l.used === 'agent' ? "L'agent" : l.used;
-        // Sa commande tourne : un signe frais de cette session, en attente
-        // (glose join renouvelle « wait » toutes les 10 s).
+        // Its command is running: a fresh sign from this waiting session
+        // (glose join renews "wait" every 10 s).
         const sienne = a && a.name === l.used && a.fresh;
         const attend = sienne && (a.activity === 'wait' || a.activity === 'joined');
-        // Le tour de l'agent en cours appartient-il à cette liaison ?
+        // Does the current agent turn belong to this link?
         const o = D.owner, mene = st.hand === 'agent' && o && o.kind === 'link' && o.id === lien.code.replace(/-/g, '');
         const autre = st.hand === 'agent' && !mene && ((D.run && D.run.running) || (o && o.kind === 'launch'));
         let texte, classe = 'lien-etat lie';
@@ -68,8 +68,8 @@ window.GloseAgents = (() => {
         clearInterval(minuteur); minuteur = 0;
         return;
       }
-      // Le compte à rebours n'est pas dans la région annoncée (lecteurs
-      // d'écran) : seuls les changements d'état le sont.
+      // The countdown is outside the announced region (screen
+      // readers): only state changes are in it.
       const attente = 'Code ' + lien.code + ' · en attente de l’agent';
       if (statut.textContent !== attente) { statut.className = 'lien-etat'; statut.textContent = attente; }
       $('lien-reste').textContent = '· expire dans ' + restant();
@@ -78,12 +78,12 @@ window.GloseAgents = (() => {
       statut.className = 'lien-etat';
       statut.textContent = 'Création du code…';
       const r = await api('/api/link', {});
-      if (!d.open) return; // fermé pendant la création : pas de minuteur
+      if (!d.open) return; // closed during creation: no timer
       if (!r.ok) { statut.className = 'lien-etat expire'; statut.textContent = r.data.message || 'Code non créé.'; return; }
       lien = r.data;
       consigne.value = lien.instruction;
-      // Un agent lancé par Glose travaille (P10.9) : la session liée prendra
-      // la main à la remise suivante, jamais en même temps que lui.
+      // An agent launched by Glose is working (P10.9): the linked session will
+      // take the turn at the next handoff, never at the same time as that agent.
       $('lien-occupe').hidden = !lien.busy;
       $('lien-occupe').textContent = lien.busy ? lien.busy + ' (lancé par Glose) mène le tour en cours : la session que vous liez attendra votre remise suivante.' : '';
       clearInterval(minuteur);
@@ -112,10 +112,10 @@ window.GloseAgents = (() => {
     d.addEventListener('close', () => { clearInterval(minuteur); minuteur = 0; lien = null; });
     $('m-lier').addEventListener('click', ouvrirLien);
 
-    // ---------- Configurer (P10.3) : la page de glose set, dans un onglet ----------
+    // ---------- Configure (P10.3): the glose set page, in a tab ----------
     function configurer() {
-      // Sans « noopener », qui fait toujours rendre null : l'ouvreur est
-      // retiré à la main (même origine).
+      // Without "noopener", which always makes it return null: the opener
+      // is removed manually (same origin).
       const w = window.open('/set#t=' + jeton(), '_blank');
       if (w) w.opener = null;
       else avis('Fenêtre bloquée : ouvrez les réglages des agents par « glose set ».', true);
@@ -131,8 +131,7 @@ window.GloseAgents = (() => {
     $('m-configurer').addEventListener('click', configurer);
     $('configurer-agents').addEventListener('click', configurer);
 
-    // ---------- L'agent lancé par Glose (P10.5) ----------
-    const nomAlias = (a) => a.name + ' (' + ({ claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode' }[a.agent] || a.agent) + (a.model ? ', ' + a.model : '') + ')';
+    // ---------- The agent launched by Glose (P10.5) ----------
     const sortie = $('sortie');
     let minuteurSortie = 0;
     function etatRun(run) {
@@ -180,47 +179,7 @@ window.GloseAgents = (() => {
     $('sortie-arreter').addEventListener('click', arreter);
     $('m-lancer').addEventListener('click', lancer);
 
-    // La case « Lancer » de la boîte de remise, et les outils requis.
-    let verif = 0;
-    // Le choix de l'auteur sur « Lancer » est retenu d'une ouverture à
-    // l'autre, tant que la présence d'un agent ne change pas de sens.
-    let choixLancer = null, presenceVue = null;
-    $('remise-lancer').addEventListener('change', () => { choixLancer = $('remise-lancer').checked; });
-    function preparerRemise(present) {
-      if (presenceVue !== present) { choixLancer = null; presenceVue = present; }
-      const D = doc();
-      const zone = $('remise-lancement');
-      const a = D && D.textAgent;
-      zone.hidden = !a;
-      $('remise-outils').hidden = true;
-      if (!a) return;
-      const occupe = D.run && D.run.running;
-      $('remise-lancer-texte').textContent = occupe ? 'Un agent lancé par Glose travaille déjà : pas de second lancement'
-        : 'Lancer ' + nomAlias(a) + ' à la remise' + (present ? ' (un agent écoute déjà)' : '');
-      $('remise-lancer').checked = !occupe && (choixLancer === null ? !present : choixLancer);
-      $('remise-lancer').disabled = !!occupe;
-      const req = D.textRequires || [];
-      if (!req.length || occupe) return;
-      const ul = $('remise-outils');
-      ul.hidden = false;
-      ul.replaceChildren(Object.assign(document.createElement('li'), { textContent: 'Vérification des outils requis (' + req.join(', ') + ')…' }));
-      const n = ++verif;
-      api('/api/agents/tools').then((r) => {
-        if (n !== verif) return;
-        ul.textContent = '';
-        if (!r.ok) { ul.append(Object.assign(document.createElement('li'), { textContent: r.data.message || 'Outils non vérifiés.' })); return; }
-        const manque = (r.data.checks || []).filter((c) => !c.found);
-        const li = document.createElement('li');
-        li.className = manque.length ? 'manque' : 'ok';
-        li.textContent = manque.length ? 'Outils non trouvés chez ' + r.data.alias.name + ' : ' + manque.map((c) => c.require).join(', ') +
-          '. Le lancement reste possible ; l\u2019agent ne pourra peut-être pas suivre toutes les consignes.' : 'Outils requis déclarés par ' + r.data.alias.name + '.';
-        ul.append(li);
-      });
-    }
-    const lancerARemise = () => !$('remise-lancement').hidden && $('remise-lancer').checked && !$('remise-lancer').disabled;
-    const choixLancement = () => ($('remise-lancement').hidden ? undefined : lancerARemise());
-
-    // configure : un agent par défaut est enregistré (glose set).
+    // configure: a default agent is recorded (glose set).
     function maj(configure) {
       if (configure !== undefined) {
         $('configurer-agents').hidden = configure;
@@ -234,9 +193,9 @@ window.GloseAgents = (() => {
       majStatut();
     }
 
-    // ---------- Destinataire d'une annotation (P10.6, D-49) ----------
-    // « Réponse par » : le nom court de l'agent qui répondra ; vide, celui
-    // du texte (ou par défaut). Montré dès qu'il y a deux noms courts.
+    // ---------- Annotation recipient (P10.6, D-49) ----------
+    // "Réponse par": the short name of the agent that will reply; if empty,
+    // the text's agent (or the default). Shown as soon as there are two short names.
     function preparerDestinataire(type, choisi) {
       const D = doc();
       const noms = (D && D.aliases) || [];
@@ -255,8 +214,8 @@ window.GloseAgents = (() => {
       select.value = choisi && noms.includes(choisi) ? choisi : '';
       $(type + '-pour-ligne').hidden = noms.length < 2;
     }
-    // Le destinataire choisi, ou « @Nom » en tête du texte (retiré du texte),
-    // reconnu seulement si ce nom court existe.
+    // The selected recipient, or "@Nom" at the start of the text (removed from it),
+    // recognized only if that short name exists.
     function destinataire(type, texte) {
       const D = doc();
       const noms = (D && D.aliases) || [];
@@ -264,12 +223,12 @@ window.GloseAgents = (() => {
       const m = /^@([A-Za-z0-9._-]{1,32})\s+/.exec(texte || '');
       if (m) {
         const n = noms.find((x) => x.toLowerCase() === m[1].toLowerCase());
-        if (n) { texte = texte.slice(m[0].length); pour = n; } // le @Nom écrit prime sur la liste
+        if (n) { texte = texte.slice(m[0].length); pour = n; } // the typed @Nom takes precedence over the list
       }
       return { pour, texte };
     }
 
-    return { preparerDestinataire, destinataire, ouvrirLien, ouvert: () => d.open || !menu.hidden || sortie.open, maj, boutonConfigurer, configurer, preparerRemise, choixLancement, voirSortie };
+    return { preparerDestinataire, destinataire, ouvrirLien, ouvert: () => d.open || !menu.hidden || sortie.open, maj, boutonConfigurer, configurer, voirSortie };
   }
   return { creer };
 })();

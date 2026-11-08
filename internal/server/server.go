@@ -213,6 +213,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /{$}", s.index)
 	mux.HandleFunc("GET /static/{name}", s.static)
+	mux.HandleFunc("GET /static/polices/{name}", s.font)
 	mux.HandleFunc("GET /project.css", s.projectCSS)
 	mux.HandleFunc("GET /api/ping", s.ping)
 	mux.HandleFunc("GET /api/doc", s.doc)
@@ -237,6 +238,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/reclaim", s.reclaim)
 	mux.HandleFunc("POST /api/link", s.link)
 	s.agentRoutes(mux)
+	s.homeRoutes(mux)
 	s.runRoutes(mux)
 	mux.HandleFunc("GET /api/progress", s.getProgress)
 	mux.HandleFunc("POST /api/progress", s.setProgress)
@@ -297,7 +299,7 @@ func public(r *http.Request) bool {
 		return false
 	}
 	p := r.URL.Path
-	return p == "/" || p == "/set" || strings.HasPrefix(p, "/static/")
+	return p == "/" || p == "/set" || p == "/home" || strings.HasPrefix(p, "/static/")
 }
 
 func (s *Server) tokenOK(t string) bool {
@@ -327,8 +329,23 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 }
 
 var staticTypes = map[string]string{"app.js": "text/javascript; charset=utf-8", "visuel.js": "text/javascript; charset=utf-8",
+	"accueil.js":         "text/javascript; charset=utf-8",
 	"brouillons.js":      "text/javascript; charset=utf-8",
 	"donnees.js":         "text/javascript; charset=utf-8",
+	"reglages.js":        "text/javascript; charset=utf-8",
+	"navette.js":         "text/javascript; charset=utf-8",
+	"interface.js":       "text/javascript; charset=utf-8",
+	"historique.js":      "text/javascript; charset=utf-8",
+	"edition.js":         "text/javascript; charset=utf-8",
+	"export.js":          "text/javascript; charset=utf-8",
+	"espace.js":          "text/javascript; charset=utf-8",
+	"themes.js":          "text/javascript; charset=utf-8",
+	"themes.css":         "text/css; charset=utf-8",
+	"export.css":         "text/css; charset=utf-8",
+	"saisie.js":          "text/javascript; charset=utf-8",
+	"colonne.js":         "text/javascript; charset=utf-8",
+	"marge.js":           "text/javascript; charset=utf-8",
+	"selection.js":       "text/javascript; charset=utf-8",
 	"navigation.js":      "text/javascript; charset=utf-8",
 	"recherche.js":       "text/javascript; charset=utf-8",
 	"archives.js":        "text/javascript; charset=utf-8",
@@ -350,6 +367,22 @@ func (s *Server) static(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", ctype)
+	w.Write(b)
+}
+
+// font serves an embedded font of the interface (D-53).
+func (s *Server) font(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if !strings.HasSuffix(name, ".woff2") {
+		http.NotFound(w, r)
+		return
+	}
+	b, err := fs.ReadFile(web.Files, "polices/"+name)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "font/woff2")
 	w.Write(b)
 }
 

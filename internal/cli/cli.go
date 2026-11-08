@@ -64,11 +64,28 @@ Commandes de l'auteur :
             installés, noms courts (agent + modèle), agent par défaut
               --list         les affiche sans ouvrir le navigateur
               --no-browser   n'ouvre pas le navigateur
+  home      ouvre la page de vos projets (ceux à profil ouverts par glose open
+            ou glose init) : à qui est la main, annotations, échéance, serveur ;
+            lit chaque projet sans rien y écrire ; un clic ouvre un projet.
+            Réservé à l'auteur : refusé si GLOSE_AGENT est posé
+              --list            les affiche sans ouvrir le navigateur
+              --json            sortie JSON (clés stables, jamais de jeton)
+              --no-browser      n'ouvre pas le navigateur
+              --forget PROJET   retire un projet du registre (identifiant ou
+                                chemin, même disparu) ; le projet n'est pas touché
   init      crée un profil glose.json s'il n'y en a pas (fichiers de la racine,
             puis un dossier par sous-dossier : à trier), et écrit la section
             « Navette Glose » dans AGENTS.md (ou CLAUDE.md s'il est seul)
               --to FICHIER   autre fichier d'instructions
               --print        affiche seulement la section
+              --type NOM     recopie d'abord le gabarit NOM de votre configuration
+                             (gabarits/NOM/ : arborescence, glose.json,
+                             consignes) sans jamais écraser ; dit ce qu'il saute
+  project   ce que vous dites du projet (glose.json, clé project) : l'affiche, ou
+            change les valeurs données, sans toucher au reste du fichier
+              --type TEXTE --status draft|active|review|done|archived
+              --deadline AAAA-MM-JJ --next-action TEXTE  (valeur vide : effacer)
+              --json         sortie JSON
 
 Commandes de la navette (auteur et agent) :
   status    à qui est la main, tour, annotations, anomalies
@@ -216,6 +233,10 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return cmdJoin(rest, stdout, stderr)
 	case "set":
 		return cmdSet(rest, stdout, stderr)
+	case "home":
+		return cmdHome(rest, stdout, stderr)
+	case "project":
+		return cmdProject(rest, stdout, stderr)
 	case "serve":
 		return cmdServe(rest, stderr)
 	default:
@@ -226,7 +247,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 // valueFlags are the options that take a value: the word after them is that
 // value, even if it starts with a dash.
 var valueFlags = map[string]bool{"file": true, "find": true, "after": true, "id": true, "text": true, "new": true, "note": true,
-	"kind": true, "status": true, "by": true, "role": true, "timeout": true, "turn": true, "to": true, "view": true, "agent": true, "model": true}
+	"kind": true, "status": true, "by": true, "role": true, "timeout": true, "turn": true, "to": true, "view": true, "agent": true, "model": true,
+	"forget": true, "type": true, "deadline": true, "next-action": true}
 
 // relPath normalises a path of the project typed by the user: forward
 // slashes, without a leading « ./ » (or « .\ » under Windows).
@@ -309,6 +331,9 @@ func cmdOpen(args []string, stdout, stderr io.Writer) int {
 	st, started, err := server.Start(p)
 	if err != nil {
 		return failure(stderr, err)
+	}
+	if p.Profiled {
+		register(p.Root, stderr)
 	}
 	fmt.Fprintf(stdout, "Glose — %s (%d fichier%s)\n", p.Title, len(p.Files), plural(len(p.Files)))
 	if !started {
@@ -677,6 +702,9 @@ func cmdCheck(args []string, stdout, stderr io.Writer) int {
 			add("ok", "profil", fmt.Sprintf("%s lu : %d fichier%s", project.ProfileName, len(p.Files), plural(len(p.Files))))
 		} else {
 			add("ok", "profil", fmt.Sprintf("pas de %s : %d fichier%s .md du dossier", project.ProfileName, len(p.Files), plural(len(p.Files))))
+		}
+		for _, w := range p.MetaWarnings {
+			add("warning", "métadonnées", w)
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		v, err := render.CheckPandoc(ctx, p.Pandoc)

@@ -17,7 +17,7 @@ func TestProfileHelp(t *testing.T) {
 		t.Fatalf("code %d, stderr %q", code, errOut)
 	}
 	// Every field of project.Profile, the filter contract and the example.
-	for _, field := range []string{"title", "files", "filter", "css", "resources", "pandoc", "exclude", "filterPerFile"} {
+	for _, field := range []string{"title", "files", "filter", "css", "resources", "pandoc", "exclude", "filterPerFile", "agent", "project"} {
 		if !strings.Contains(out, "\n  "+field+" ") {
 			t.Errorf("aide du profil sans le champ %s", field)
 		}
@@ -56,14 +56,14 @@ func TestProfileHelpExampleRenders(t *testing.T) {
 	}
 	write("introduction.md", "# Titre\n\nPremier paragraphe, *en partie* mis en valeur.\n\nAttention, second paragraphe.\n")
 	write("chapitres/01.md", "Troisième paragraphe.\n")
-	write("github.com/ptitan/glose/rendu.lua", exampleFilter)
-	write("github.com/ptitan/glose/rendu.css", exampleCSS)
+	write("glose/rendu.lua", exampleFilter)
+	write("glose/rendu.css", exampleCSS)
 	write("glose.json", `{"files": ["introduction.md", "chapitres/01.md"]}`)
 	code, plain, errOut := run("render", dir)
 	if code != ExitOK || errOut != "" {
 		t.Fatalf("sans filtre : code %d, stderr %q", code, errOut)
 	}
-	write("glose.json", `{"files": ["introduction.md", "chapitres/01.md"], "filter": "github.com/ptitan/glose/rendu.lua", "css": "github.com/ptitan/glose/rendu.css"}`)
+	write("glose.json", `{"files": ["introduction.md", "chapitres/01.md"], "filter": "glose/rendu.lua", "css": "glose/rendu.css"}`)
 	code, html, errOut := run("render", dir)
 	if code != ExitOK || errOut != "" {
 		t.Fatalf("avec filtre : code %d, stderr %q", code, errOut)
@@ -84,6 +84,68 @@ func TestProfileHelpExampleRenders(t *testing.T) {
 	}
 	if code, out, _ := run("check", dir); code != ExitOK {
 		t.Errorf("glose check : code %d\n%s", code, out)
+	}
+}
+
+// The example of the key « project », as printed, is read without a warning.
+func TestProfileHelpProjectExample(t *testing.T) {
+	_, out, _ := run("help", "profile")
+	block := regexp.MustCompile(`(?s)"project": \{.*?\}`).FindString(out)
+	if block == "" {
+		t.Fatal("aide du profil sans exemple de la clé project")
+	}
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "a.md"), []byte("Texte.\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "glose.json"), []byte("{"+block+"}"), 0o644)
+	p, err := project.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := project.Meta{Type: "article", Status: "review", Deadline: "2026-12-31", NextAction: "Vérifier les références"}
+	if p.Meta != want || len(p.MetaWarnings) != 0 {
+		t.Fatalf("%+v %q", p.Meta, p.MetaWarnings)
+	}
+}
+
+// An invalid value is reported by glose doctor and glose check, and the text
+// still opens.
+func TestInvalidMetaIsReported(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "a.md"), []byte("Texte.\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "glose.json"), []byte(`{"project":{"status":"fini"}}`), 0o644)
+	for _, cmd := range []string{"doctor", "check"} {
+		_, out, errOut := run(cmd, dir)
+		if !strings.Contains(out, "project.status") || strings.Contains(errOut, "illisible") {
+			t.Errorf("%s : %q %q", cmd, out, errOut)
+		}
+	}
+	if code, out, errOut := run("list", dir); code != ExitOK {
+		t.Errorf("list : %d %q %q", code, out, errOut)
+	}
+}
+
+// Glose names no project and no tool of its author in its code (D-52,
+// invariant 8): those live in the configuration of the author.
+func TestNoPersonalToolInTheCode(t *testing.T) {
+	root := filepath.Join("..", "..")
+	forbidden := regexp.MustCompile(`(?i)oral-notes|lexharness`)
+	for _, dir := range []string{"cmd", "internal", "web"} {
+		err := filepath.WalkDir(filepath.Join(root, dir), func(path string, d os.DirEntry, err error) error {
+			if err != nil || d.IsDir() || strings.HasSuffix(path, "_test.go") || strings.Contains(path, "testdata") {
+				return err
+			}
+			b, err := os.ReadFile(path)
+			if err != nil {
+				return err
+			}
+			if m := forbidden.Find(b); m != nil {
+				t.Errorf("%s nomme %q", path, m)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

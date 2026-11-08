@@ -4,14 +4,27 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Agents — Glose</title>
+<script src="/static/themes.js"></script>
 <link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/themes.css">
 <script src="/static/icones.js" defer></script>
+<script src="/static/espace.js" defer></script>
 <script src="/static/reglages-agents.js" defer></script>
 </head>
 <body class="page-agents">
+<aside class="acc-nav">
+  <a class="acc-logo" href="/home" data-accueil><svg class="ic" viewBox="0 0 24 24" data-icone="a-projet" aria-hidden="true"></svg><span>Glose</span></a>
+  <nav aria-label="Navigation principale">
+    <a href="/home" data-accueil><svg class="ic" viewBox="0 0 24 24" data-icone="accueil" aria-hidden="true"></svg><span>Accueil</span></a>
+    <a href="/set" aria-current="page"><svg class="ic" viewBox="0 0 24 24" data-icone="agent" aria-hidden="true"></svg><span>Agents</span></a>
+    <button id="acc-reglages" type="button" title="Réglages"><svg class="ic" viewBox="0 0 24 24" data-icone="configurer" aria-hidden="true"></svg><span>Réglages</span></button>
+  </nav>
+  <small>Votre espace de travail local</small>
+</aside>
 <main class="ra">
+  <a id="ra-accueil" class="acc-retour" href="/home"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" data-icone="retour"></svg> Vos projets</a>
   <header class="ra-tete">
-    <span class="sceau" aria-hidden="true">g</span>
+    <svg class="ic" viewBox="0 0 24 24" data-icone="a-projet" aria-hidden="true"></svg>
     <div>
       <h1>Agents</h1>
       <p>Réglages généraux de Glose, valables pour tous vos projets.</p>

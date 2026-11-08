@@ -1,8 +1,8 @@
 "use strict";
-// Page des réglages des agents (P10.3, « glose set ») : agents installés,
-// noms courts (agent + modèle) et celui par défaut. Réglages généraux, les
-// mêmes pour tous les projets (D-48). Servie par le serveur d'un projet ou
-// par le serveur de réglages éphémère ; le jeton vient de l'adresse.
+// Agent settings page (P10.3, "glose set"): installed agents,
+// short names (agent + model) and the default one. General settings,
+// shared by all projects (D-48). Served by a project server or
+// the temporary settings server; the token comes from the address.
 (() => {
   const $ = (id) => document.getElementById(id);
   const el = (tag, classe, texte) => {
@@ -26,6 +26,10 @@
     jeton = sessionStorage.getItem('glose-jeton-agents') || sessionStorage.getItem('glose-jeton') || '';
   }
 
+  for (const lien of [$('ra-accueil'), ...document.querySelectorAll('[data-accueil]')]) {
+    lien.href = '/home' + (jeton ? '#t=' + jeton : '');
+  }
+
   async function api(chemin, corps) {
     const opt = { headers: { 'X-Glose-Token': jeton } };
     if (corps !== undefined) {
@@ -36,14 +40,14 @@
     try {
       const r = await fetch(chemin, opt);
       let data = {};
-      try { data = await r.json(); } catch (_) { /* sans JSON */ }
+      try { data = await r.json(); } catch (_) { /* without JSON */ }
       return { ok: r.ok, status: r.status, data };
     } catch (_) {
       return { ok: false, status: 0, data: { message: 'Le serveur Glose ne répond pas : relancez « glose set ».' } };
     }
   }
 
-  let etat = null; // dernière réponse de /api/agents
+  let etat = null; // last response from /api/agents
   let modifie = false;
   const modeles = new Map(); // agent -> { liste, message }
 
@@ -171,8 +175,8 @@
     modifie = false;
   }
 
-  // Pendant une requête, le formulaire est immobile : sa réponse ne peut
-  // pas effacer une saisie faite entre-temps.
+  // During a request, the form is frozen: its response cannot
+  // erase input entered in the meantime.
   function occupe(oui) {
     for (const c of document.querySelectorAll('.ra input, .ra select, .ra button')) {
       if (oui) { c.dataset.raAvant = c.disabled ? '1' : ''; c.disabled = true; } else { c.disabled = c.dataset.raAvant === '1'; delete c.dataset.raAvant; }
@@ -212,12 +216,12 @@
     if (!r.ok) { statut(r.data.message || 'Recherche impossible.', 'erreur'); return; }
     etat = r.data;
     modeles.clear();
-    // La saisie non enregistrée reste, avec l'empreinte des réglages sur
-    // lesquels elle a été faite.
+    // Unsaved input remains, with the hash of the settings
+    // it was based on.
     if (saisie) { etat.config = saisie; etat.hash = hash; afficher(); marquer(); } else afficher();
   }
 
-  // ---------- Essayer (P10.4) ----------
+  // ---------- Try (P10.4) ----------
   async function essai(q) {
     if (!etat) return;
     const k = etat.detection.agents.find((a) => a.id === q.agent);
@@ -235,7 +239,7 @@
     $('ra-essai-sortie').textContent = d.output || '(aucune sortie)';
   }
 
-  // ---------- Outils requis par le texte (P10.4) ----------
+  // ---------- Tools required by the text (P10.4) ----------
   async function verifier() {
     const ul = $('ra-outils');
     ul.hidden = false;
@@ -258,8 +262,7 @@
   }
 
   async function demarrer() {
-    const s = await api('/api/settings');
-    if (s.ok && s.data.theme) document.documentElement.dataset.theme = s.data.theme;
+    window.GloseEspace.brancher(jeton);
     const r = await api('/api/agents');
     if (!r.ok) {
       erreur(r.status === 401 ? 'Session absente ou périmée : relancez « glose set » et ouvrez l’adresse qu’il affiche.' : (r.data.message || 'Réglages illisibles.'));
@@ -267,7 +270,7 @@
     }
     etat = r.data;
     afficher();
-    // Le serveur de réglages s'arrête quand la page ne l'interroge plus.
+    // The settings server stops when the page no longer polls it.
     setInterval(() => api('/api/ping'), 10000);
   }
 

@@ -32,3 +32,6 @@ func syncDir(dir string) error {
 	defer d.Close()
 	return d.Sync()
 }
+
+// renameFile replaces newpath by oldpath.
+func renameFile(oldpath, newpath string) error { return os.Rename(oldpath, newpath) }

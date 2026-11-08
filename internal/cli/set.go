@@ -69,7 +69,7 @@ func cmdSet(args []string, stdout, stderr io.Writer) int {
 	signal.Notify(sig, os.Interrupt)
 	defer signal.Stop(sig)
 	go func() { <-sig; close(stop) }()
-	err := server.ServeSettings(func(url string) {
+	err := server.ServeSettings("/set", func(url string) {
 		open(url)
 		fmt.Fprintln(stdout, "Le serveur des réglages s'arrête quelques minutes après la fermeture de la page (Ctrl+C pour l'arrêter tout de suite).")
 	}, stop)

@@ -7,12 +7,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"syscall"
 	"time"
 
@@ -102,7 +104,17 @@ func Serve(p *project.Project) error {
 	// A turn with several recipients interrupted by a restart (P10.6).
 	s.resumePasses()
 
-	srv := &http.Server{Handler: s.Handler(), ReadHeaderTimeout: 10 * time.Second}
+	// A browser opens connections in advance: without a request yet, Shutdown
+	// would wait 5 s for them. They are closed first: nothing is lost.
+	var waiting sync.Map
+	srv := &http.Server{Handler: s.Handler(), ReadHeaderTimeout: 10 * time.Second,
+		ConnState: func(c net.Conn, st http.ConnState) {
+			if st == http.StateNew {
+				waiting.Store(c, true)
+			} else {
+				waiting.Delete(c)
+			}
+		}}
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(sig)
@@ -119,6 +131,10 @@ func Serve(p *project.Project) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	waiting.Range(func(c, _ any) bool {
+		c.(net.Conn).Close()
+		return true
+	})
 	srv.Shutdown(ctx)
 	fmt.Fprintf(os.Stderr, "%s glose : serveur arrêté\n", time.Now().Format(time.RFC3339))
 	return nil
@@ -347,7 +363,8 @@ func StopRunning(dir string) error {
 	if err := call(st, http.MethodPost, "/api/stop", nil); err != nil {
 		return err
 	}
-	for i := 0; i < 50; i++ {
+	// Longer than the 5 s that Serve leaves to Shutdown.
+	for i := 0; i < 80; i++ {
 		if _, err := os.Stat(filepath.Join(dir, stateFile)); errors.Is(err, os.ErrNotExist) {
 			return nil
 		}

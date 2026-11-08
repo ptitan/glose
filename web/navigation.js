@@ -1,5 +1,5 @@
-// Navigation locale, isolée de l'édition. Le serveur ne résout que des cibles
-// du projet ; aucun texte n'est modifié et aucun chemin disque n'est accepté.
+// Local navigation, isolated from editing. The server only resolves project
+// targets; no text is modified and no disk path is accepted.
 "use strict";
 window.GloseNavigation = (() => {
   function creer({ api, courant, afficherPartie, avis, amener }) {

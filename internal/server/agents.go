@@ -299,11 +299,12 @@ var (
 	settingsFirst = 3 * time.Minute
 )
 
-// ServeSettings runs the settings server of « glose set » outside any
-// project (P10.3): 127.0.0.1, a token, only the page of the settings of the
-// agents. ready receives its address once it listens. It returns when the
-// page has been closed for settingsIdle, or when stop is closed.
-func ServeSettings(ready func(url string), stop <-chan struct{}) error {
+// ServeSettings runs the server of « glose set » and « glose home » outside
+// any project (P10.3, P11.5): 127.0.0.1, a token, only the settings of the
+// agents and the overview of the projects. page is the page to open (/set,
+// /home); ready receives its address once it listens. It returns when the page
+// has been closed for settingsIdle, or when stop is closed.
+func ServeSettings(page string, ready func(url string), stop <-chan struct{}) error {
 	ln, port, err := Listen()
 	if err != nil {
 		return err
@@ -315,8 +316,11 @@ func ServeSettings(ready func(url string), stop <-chan struct{}) error {
 	s := &Server{Token: token, Port: port, Stop: make(chan struct{})}
 	mux := http.NewServeMux()
 	s.agentRoutes(mux)
+	s.homeRoutes(mux)
 	mux.HandleFunc("GET /static/{name}", s.static)
+	mux.HandleFunc("GET /static/polices/{name}", s.font)
 	mux.HandleFunc("GET /api/settings", s.getSettings)
+	mux.HandleFunc("POST /api/settings", s.setSettings)
 	mux.HandleFunc("GET /api/ping", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "settings": true})
 	})
@@ -336,7 +340,7 @@ func ServeSettings(ready func(url string), stop <-chan struct{}) error {
 	srv := &http.Server{ReadHeaderTimeout: 10 * time.Second, Handler: h}
 	done := make(chan error, 1)
 	go func() { done <- srv.Serve(ln) }()
-	ready(fmt.Sprintf("http://127.0.0.1:%d/set#t=%s", port, token))
+	ready(fmt.Sprintf("http://127.0.0.1:%d%s#t=%s", port, page, token))
 	tick := time.NewTicker(time.Second)
 	defer tick.Stop()
 loop:
