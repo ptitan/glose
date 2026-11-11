@@ -182,6 +182,20 @@ class Page {
       element.dispatchEvent(new Event('change', { bubbles: true }));
     }, selector, text);
   }
+  // Same contract as cdp.cjs: a key name or one character, and modifiers
+  // as a CDP bit mask (1 Alt, 2 Ctrl, 4 Meta, 8 Shift). Real key events
+  // (input.performActions), not synthetic ones: the page sees isTrusted.
+  async key(key, modifiers = 0) {
+    const special = { Enter: '', Escape: '', Tab: '', Backspace: '', ArrowUp: '', ArrowDown: '' };
+    const mods = [[1, ''], [2, ''], [4, ''], [8, '']].filter(([bit]) => modifiers & bit).map(([, value]) => value);
+    const value = special[key] || key;
+    const actions = [
+      ...mods.map((v) => ({ type: 'keyDown', value: v })),
+      { type: 'keyDown', value }, { type: 'keyUp', value },
+      ...mods.reverse().map((v) => ({ type: 'keyUp', value: v })),
+    ];
+    await this.send('input.performActions', { context: this.context, actions: [{ type: 'key', id: 'clavier', actions }] });
+  }
   async close() {
     this.bidi.listeners = this.bidi.listeners.filter((l) => l !== this.listener);
     await this.send('browsingContext.close', { context: this.context });

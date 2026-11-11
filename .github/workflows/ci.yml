@@ -76,3 +76,54 @@ jobs:
         run: go vet ./...
       - name: go test
         run: go test -count=1 ./...
+
+  navigateurs:
+    name: Navigateurs (${{ matrix.os }})
+    # Scénarios de bout en bout (scripts/browser) : serveur, interface, Chrome
+    # et Firefox déjà installés sur les machines de GitHub, sans interface.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+      - name: pandoc (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          deb="pandoc-${PANDOC_VERSION}-1-amd64.deb"
+          curl -sSLo "$RUNNER_TEMP/$deb" "https://github.com/jgm/pandoc/releases/download/${PANDOC_VERSION}/$deb"
+          echo "caa7e0410f9e2cb1da2eb8db13cc97b5548fe455985e2c944e3929d22f99bcdc  $RUNNER_TEMP/$deb" | sha256sum -c -
+          sudo dpkg -i "$RUNNER_TEMP/$deb"
+          # Ubuntu 24.04 : AppArmor peut refuser à Chrome les espaces de noms
+          # de son bac à sable ; on les permet plutôt que de lancer Chrome
+          # sans bac à sable.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+      - name: pandoc (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $zip = "pandoc-$env:PANDOC_VERSION-windows-x86_64.zip"
+          $dest = Join-Path $env:RUNNER_TEMP $zip
+          Invoke-WebRequest -Uri "https://github.com/jgm/pandoc/releases/download/$env:PANDOC_VERSION/$zip" -OutFile $dest
+          $hash = (Get-FileHash -Algorithm SHA256 $dest).Hash.ToLower()
+          if ($hash -ne "9b2d439db3188a624d212e1c73462ebb97453427cb470dc08bb31bf128429337") { throw "empreinte de pandoc inattendue : $hash" }
+          Expand-Archive -Path $dest -DestinationPath $env:RUNNER_TEMP
+          Add-Content -Path $env:GITHUB_PATH -Value (Join-Path $env:RUNNER_TEMP "pandoc-$env:PANDOC_VERSION")
+      - name: Construire glose
+        shell: bash
+        run: ./scripts/build.sh
+      - name: Chrome
+        run: node scripts/browser/run.cjs
+      - name: Firefox
+        if: ${{ !cancelled() }}
+        run: node scripts/browser/firefox.cjs

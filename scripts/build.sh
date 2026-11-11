@@ -6,5 +6,7 @@ command -v go >/dev/null 2>&1 || export PATH="$HOME/.local/go/bin:$PATH"
 
 version=$(git describe --tags --always --dirty 2>/dev/null || echo "0.0.0-dev")
 mkdir -p bin
-go build -ldflags "-X github.com/ptitan/glose/internal/cli.Version=$version" -o bin/glose ./cmd/glose
-echo "bin/glose ($version)"
+out=bin/glose
+[ "$(go env GOOS)" = windows ] && out=bin/glose.exe
+go build -ldflags "-X github.com/ptitan/glose/internal/cli.Version=$version" -o "$out" ./cmd/glose
+echo "$out ($version)"

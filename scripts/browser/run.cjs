@@ -88,6 +88,11 @@ async function rejectAll(page) {
   }
 }
 
+// Scenarios whose fake agents are shell scripts: skipped under Windows,
+// where they cannot run (said in the report, never passed silently).
+const shellAgents = new Set(['outils requis et essai d’un faux agent (P10.4)', 'Glose lance l’agent à la remise (P10.5)',
+  'destinataires : Réponse par, @Nom, deux agents à la suite (P10.6)']);
+
 const scenarios = [
   ["missions : cartes et filtre de marge", require("./missions.cjs")],
   ["missions : « Tout accepter » limité à la mission (D-65)", require("./mission-batch.cjs")],
@@ -1242,7 +1247,9 @@ const scenarios = [
     await p.stop();
     const base = path.join(p.dir, 'mes-projets');
     // Le dossier temporaire du système n'entre pas au registre : il est ailleurs le temps de l'essai.
-    p.env.TMPDIR = path.join(p.dir, 'systeme-tmp'); await fs.mkdir(p.env.TMPDIR);
+    // The system temporary directory elsewhere: TMPDIR under Unix, TMP and
+    // TEMP under Windows.
+    p.env.TMPDIR = p.env.TMP = p.env.TEMP = path.join(p.dir, 'systeme-tmp'); await fs.mkdir(p.env.TMPDIR);
     const projet = async (nom, profil) => {
       const d = path.join(base, nom); await fs.mkdir(d, { recursive: true });
       await fs.writeFile(path.join(d, 'a.md'), '# Titre\n\nUn {>>mot<<} texte.\n');
@@ -1360,9 +1367,16 @@ const scenarios = [
     await page.fill('#recherche-texte', 'CIBLE INTROUVABLE');
     await page.wait('résultat global', () => document.querySelectorAll('.resultat-recherche').length === 1);
     if (process.env.GLOSE_KEEP_BROWSER_TESTS === '1') await fs.writeFile(path.join(p.dir, 'recherche.png'), Buffer.from((await page.send('Page.captureScreenshot')).data, 'base64'));
+    // Every notice is kept: the poll of the disk may announce the change
+    // just after the refusal, in the same place (Windows, under load).
+    await page.evaluate(() => {
+      window.__avisVus = [];
+      new MutationObserver(() => window.__avisVus.push(document.getElementById('avis').textContent))
+        .observe(document.getElementById('avis'), { childList: true, characterData: true, subtree: true });
+    });
     await p.write(b + '\n', 'chapitre/b espace.md');
     await page.click('.resultat-recherche');
-    await page.wait('résultat périmé refusé', () => document.getElementById('avis').textContent.includes('relancez la recherche'));
+    await page.wait('résultat périmé refusé', () => window.__avisVus.some((t) => t.includes('relancez la recherche')));
     assert.equal(await page.evaluate(() => !!document.querySelector('#texte .g-recherche')), false);
     await p.write(b, 'chapitre/b espace.md');
     await focusText(page); await page.key('f', 10);
@@ -1406,7 +1420,8 @@ if (require.main === module) test('Glose dans un navigateur isolé', { timeout: 
   const chosen = scenarios.filter(([name]) => !process.env.GLOSE_BROWSER_CASE || name.includes(process.env.GLOSE_BROWSER_CASE));
   assert.ok(chosen.length, 'aucun scénario correspondant à GLOSE_BROWSER_CASE');
   for (const [name, scenario] of chosen) {
-    await t.test(name, { timeout: 45000 }, async () => {
+    const skip = process.platform === 'win32' && shellAgents.has(name) && 'faux agent en script shell, sans équivalent sous Windows';
+    await t.test(name, { timeout: 45000, skip }, async () => {
       const dir = await fs.mkdtemp(path.join(root, 'projet-'));
       const p = new Project(dir); let page;
       try {
