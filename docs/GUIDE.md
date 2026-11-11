@@ -48,11 +48,66 @@ Cette sortie ne contient jamais de jeton : elle ne permet pas d'ouvrir une sessi
 
 **Partir d'un gabarit.** `glose init --type article` recopie d'abord le dossier `gabarits/article/` de votre configuration (à côté de `agents.json`) : son arborescence, son `glose.json` (clés `project` et `agent` comprises), ses consignes. Rien n'est écrasé, et ce qui est sauté est dit. Sans gabarit de ce nom, la commande liste ceux qui existent. Glose n'en fournit aucun : ils sont à vous.
 
+## 1 quater. Préparer une consigne réutilisable
+
+Ouvrez `glose set`, puis **Consignes → Ajouter une consigne**. Par exemple :
+
+- nom **Réécrire**, icône **Plume** choisie dans la grille d’icônes nommées ;
+- consigne : « /rewrite relis tout le texte et propose les modifications nécessaires » ;
+- agent : votre nom court Claude Code ou OpenCode ; sans choix, l'agent du texte, sinon celui par défaut ;
+- portée : **Fichier affiché**, **Fichiers choisis** ou **Projet entier** ;
+- sous **Options**, cochez **Bouton dans la barre des vues** pour un raccourci ; la consigne figure toujours dans le panneau de remise ;
+- annotations en cours : **Refuser le lancement** pour commencer sur les fichiers choisis sans annotation, ou **Les traiter aussi**.
+
+Chaque consigne enregistrée est repliée sur une ligne (icône, nom, agent). Cliquez pour la déplier : Nom, Icône, Consigne et Agent sont visibles, le reste se trouve dans **Options** (portée, accès et limites). L’identifiant se déduit du nom à la création puis reste stable. Chaque aide se lit dans une bulle, au survol ou au focus du bouton (i).
+
+`/rewrite` est du texte remis à l'agent : Glose ne crée ni commande slash ni skill. Pour une méthode particulière, indiquez son nom et sa manière d'être chargée dans le prompt. Les skills et les serveurs MCP doivent déjà exister dans la configuration de l'agent.
+
+Le dossier de lancement vide désigne la racine du projet ; la durée vide reprend le réglage général (30 minutes en l'absence de réglage). Les chemins relatifs des réglages globaux sont interprétés depuis le projet courant. Les dossiers doivent exister. Si vous lancez depuis un autre dossier, la consigne rappelle à l'agent de passer explicitement le chemin du texte aux commandes `glose`.
+
+**Accès.** La section **Accès par défaut des consignes** vaut pour toutes les consignes. Chaque consigne peut les élargir, jamais les réduire. Les oui-non sont des interrupteurs, les choix à trois valeurs des segments. Choisissez **Dossiers choisis** pour lire des dossiers supplémentaires : leur liste, un par ligne, apparaît alors ; n’activez l'écriture extérieure que si elle est nécessaire. **Tous** est déconseillé. Les outils MCP, séparés par des virgules, s'ajoutent à ceux requis par le texte. Python ou le shell peuvent agir avec les droits de votre compte : les cases dossiers et web ne les isolent pas. Lisez les limites affichées pour chaque agent ; une case non applicable ne constitue pas une protection. [Tableau et versions vérifiées](etudes/p15-acces.md).
+
+**Lancer.** Cliquez sur l'icône de la consigne dans la barre ou choisissez-la dans le panneau de remise. Vérifiez la sélection des fichiers (pour un fichier affiché, le premier fichier visible est présélectionné), l'agent, le dossier, la durée et le rappel des accès. Ajoutez une note si nécessaire, puis cliquez sur **Lancer** ; **Annuler** ferme le panneau. Sous l’agent et les fichiers, **Accès accordés** donne chaque accès sur sa ligne, coché s’il est accordé, barré sinon ; ouvrez **Détails** pour les limites de l’agent, le dossier et la durée. Aucune case de confirmation. Rien ne se lance au clic sur l'icône. Pour changer les accès, retournez dans `glose set`. Si les réglages changent entre aperçu et confirmation, la remise est refusée ; votre note reste dans le panneau. Si les fichiers choisis ont des annotations à trancher, l’encart **Lancement en attente** le dit, **Lancer** reste désactivé et **Aller à la première annotation** y mène. Les annotations dans les autres fichiers ne bloquent pas. **Aucune** conserve la remise habituelle. Une consigne lance son agent choisi, même si une autre session attend déjà.
+
+Au retour, les changements libres deviennent des propositions, comme dans toute navette. L'auteur les accepte ou les rejette. La capsule montre la consigne pendant le travail ; `glose status` et `glose log` la donnent aussi. Après un échec, **Relancer** reprend la consigne inscrite à la remise, même si ses réglages ont changé depuis.
+
+Pendant son tour, l’agent peut lancer `glose progress --text "Je vérifie les références."` (120 caractères au plus). La phrase et son heure apparaissent sous son activité dans la capsule et le panneau des tours. Elles ne vont ni dans le manuscrit ni dans le journal et disparaissent après la remise. **Afficher la sortie** reste disponible pour le détail.
+
+Un projet peut proposer sa propre consigne, en modifiant à la main `glose.json` :
+
+```json
+{
+  "tasks": [
+    {
+      "id": "rewrite",
+      "name": "Réécrire",
+      "icon": "suggerer",
+      "description": "Relecture complète du chapitre",
+      "prompt": "/rewrite relis tout le texte et propose les modifications nécessaires.",
+      "scope": "file",
+      "place": ["bar", "handover"],
+      "whenAnnotations": "block",
+      "maxMinutes": 30,
+      "access": {
+        "externalDirs": "list",
+        "dirs": ["references"],
+        "web": true,
+        "scripts": "none"
+      }
+    }
+  ]
+}
+```
+
+Créez le dossier `references` pour cet exemple. Tous les dossiers de la consigne du projet, y compris `workdir`, sont relatifs au projet ; aucun chemin absolu ni secret. À identifiant égal, l'entrée du projet remplace toute la consigne globale. Les réglages globaux d'accès continuent de s'ajouter. `glose check` signale les consignes invalides. La page des consignes modifie seulement les entrées globales ; les entrées du projet restent dans son profil.
+
+**Validation réelle à faire par l'autre agent (P15.5).** Sur une copie propre d'un chapitre, et aussi un Markdown ordinaire sans profil, lancer **Réécrire** avec Claude Code puis OpenCode. Vérifier le chargement de la méthode/skill hors du projet, le fichier annoté au retour, le journal `task`, le rejet qui rend les octets originaux et l'absence de changement hors de la copie. Cet essai réel n'est pas réalisé par la présente implémentation.
+
 ## 2. Le déroulement d'une navette
 
 Une navette est une suite de tours. La main est d'abord à l'auteur.
 
-**L'écran.** En haut, le livre ouvert et **Glose** ramènent aux projets ; le fil d’Ariane donne le titre de l’ouvrage, puis le tour, le nombre d’annotations ouvertes et **Affichage**. Dessous, le **bandeau de la navette** montre la main (jeton vert pour l’auteur, ardoise pour l’agent), l’état de l’agent et les commentaires, suggestions et réponses de ce tour ; **Remettre à l’agent** ou **Reprendre la main** ouvre la boîte correspondante. Le bandeau devient ambre quand personne n’écoute. La barre d’outils réunit **Modifications**, **Actuel**, **Proposé** (touches 1 à 3), Annuler, Rétablir, **Rechercher** (Ctrl+Maj+F) et le pourcentage de sections affichées relues. Après 80 pixels de défilement, ces trois barres deviennent une ligne compacte de 48 pixels ; la loupe rouvre la recherche. À gauche, la colonne à onglets ; au centre, le texte ; à droite, les annotations en marge. Le pied de page donne l’état du rendu et le bouton **Brouillons**.
+**L'écran.** En haut, **glose** ramène aux projets ; à côté, le titre de l’ouvrage, et dessous ce qui est affiché et le pourcentage de sections relues ; à droite, **Annuler**, **Rétablir** et **Réglages** (l’affichage). Dessous, le **bandeau de la navette** montre la main (vert pour vous, ardoise pour l’agent), l’état de l’agent et les commentaires, suggestions et réponses de ce tour ; **Remettre à l’agent** ou **Reprendre la main** ouvre la boîte correspondante, et **Afficher la sortie** montre ce que fait un agent lancé par Glose. Le bandeau devient ambre quand personne n’écoute. La troisième bande réunit les vues **Modifications**, **Actuel**, **Proposé** et **Depuis** (touches 1 à 3), puis à droite **Rechercher** (Ctrl+Maj+F), **Exporter en PDF**, vos consignes et **Typo**. Dans une fenêtre de 1280 pixels ou moins, Rechercher, Annuler et Rétablir passent dans **Plus**. Après 80 pixels de défilement, ces trois bandes deviennent une ligne compacte de 48 pixels ; la loupe rouvre la recherche. À gauche, la colonne à onglets ; au centre, le texte ; à droite, les annotations en marge. Le pied de page donne l’état du rendu et le bouton **Brouillons**.
 
 **Votre tour.** Dans le navigateur :
 - sélectionnez un passage, puis **Commenter** (C) ou **Suggérer** (S) ; la poignée de la marge gauche agit sur un paragraphe entier, le menu « + » ajoute un élément avant ou après ;
@@ -68,11 +123,13 @@ Une navette est une suite de tours. La main est d'abord à l'auteur.
 
 **Commenter et suggérer.** Le panneau **Commenter** s'ouvre en marge droite à hauteur du passage : le texte reste lisible et défilable. **Ajouter** (Ctrl+Entrée) enregistre la remarque ; **Annuler**, la croix ou Échap ferment le panneau en conservant le brouillon. Le focus revient au point de départ, ou au texte. Une saisie en cours doit être fermée avant d'en ouvrir une autre.
 
-Le panneau **Suggérer** se place sous le passage quand la place suffit, sinon dans une marge droite élargie. Les onglets **Mis en forme**, **Source** et **Aperçu**, la barre d'outils (Ctrl+B, Ctrl+I), les propositions qui seront créées, **Une seule proposition**, le message et **Réponse par** restent disponibles. Le contenu défile dans le panneau ; **Annuler** et **Ajouter la suggestion** restent en bas. Les touches d'une composition IME appartiennent à la méthode de saisie, y compris Échap et Ctrl+Entrée.
+Le panneau **Suggérer** se place sous le passage quand la place suffit, sinon dans une marge droite élargie. Les onglets **Mis en forme**, **Source** et **Aperçu**, la barre d'outils (Ctrl+B, Ctrl+I), les propositions qui seront créées, **Une seule proposition**, le message et **Réponse par** restent disponibles. Le contenu défile dans le panneau ; **Annuler**, **Appliquer directement** et **Ajouter la suggestion** restent en bas. Les touches d'une composition IME appartiennent à la méthode de saisie, y compris Échap et Ctrl+Entrée.
+
+**Modifier directement.** Quand une correction n'a pas à être discutée, **Appliquer directement** (Ctrl+Maj+Entrée) l'écrit tout de suite dans le texte, sans proposition. L'agent la verra comme une modification imposée et ne la discutera pas. Le bouton est désactivé tant que vous écrivez un message pour l'agent : un message demande une réponse, il va donc avec une suggestion. Ctrl+Z annule la modification tant que le fichier n'a pas changé ; elle figure dans **Traitées** comme « Imposé ».
 
 **Exporter en PDF.** Le bouton après Annuler et Rétablir ouvre un petit panneau : **Modifications apparentes** (avec les commentaires en marge, si la case reste cochée), **Actuel** ou **Proposé**. Glose exporte ce qui est affiché : pour une seule partie d'un gros projet, choisissez-la d'abord dans le sommaire. **Exporter** ouvre la fenêtre d'impression : choisissez « Enregistrer au format PDF ». Sous Chrome et Edge, décochez une fois « En-têtes et pieds de page », qui ajouterait l'adresse de la page ; les numéros de page restent. Sous Firefox, la page est numérotée par sa propre fenêtre d'impression. Ctrl+P donne la vue affichée avec ses commentaires. L'écran revient ensuite tel qu'il était, et rien n'est écrit dans vos fichiers.
 
-**Affichage** ouvre un petit panneau sous son bouton : police, taille, interligne, largeur, justification, thème et retour aux réglages par défaut. **Réglages**, dans le menu de l'accueil et de la page Agents, offre les mêmes choix avec un aperçu de chaque thème. **Revenir au texte**, en haut de ce menu, vous ramène à l'endroit où vous étiez. La page `/set` reprend la navigation et les champs de l'accueil ; **Vos projets** ramène à la bibliothèque.
+**Réglages**, en haut à droite du texte, ouvre un petit panneau sous son bouton : police, taille, interligne, largeur, justification, thème et retour aux réglages par défaut. **Réglages**, dans le menu de l'accueil et de la page Agents, offre les mêmes choix, avec un aperçu de chaque thème. **Revenir au texte**, en haut de ce menu, vous ramène à l'endroit où vous étiez. La page `/set` reprend la navigation et les champs de l'accueil ; **Vos projets** ramène à la bibliothèque.
 
 **Le tour de l'agent.** Il attend votre remise (`glose wait`), lit les annotations (`glose list --json`), répond, propose ou modifie librement les fichiers, puis remet son tour (`glose done`). Ses modifications libres deviennent des propositions mot à mot ; seule une réécriture faite par `glose propose --whole` devient une proposition unique, à accepter ou rejeter en bloc. Pendant ce tour, vous lisez mais n'écrivez pas : la barre du haut le rappelle.
 
@@ -175,7 +232,7 @@ Un commentaire, une réponse ou une réécriture que vous n'avez pas encore enre
 
 **Navigation et recherche.** Les images relatives se résolvent par rapport au fichier Markdown qui les contient : `chapitre/texte.md` peut écrire `![Figure](img/figure.png)` pour `chapitre/img/figure.png`. Un lien `[suite](../chapitre-2/texte.md#section)` ouvre le fichier du projet et son ancre, même non affichés ; un simple `#section` cherche d'abord dans son propre fichier, puis dans les autres, seulement si la cible est unique. Une cible absente ou ambiguë est signalée, pas devinée. Le navigateur ne quitte pas Glose pour suivre un lien Markdown local. Avec un filtre, le contrat de provenance et les enveloppes de fichiers doivent rester respectés.
 
-Le champ **Rechercher** de la barre du haut (Ctrl+Maj+F ; Ctrl+F reste celui du navigateur) cherche littéralement dans le Markdown projeté de tous les fichiers : vue Actuel en Relecture/Actuel, vue Proposé en Proposé. Les annotations et métadonnées CriticMarkup ne sont pas cherchées ; les signes Markdown, échappements et différences d'accents composés/décomposés restent pris en compte. Les majuscules sont ignorées, sauf option contraire. Le total est indiqué et les 200 premiers résultats contextualisés sont affichés. Les résultats s'affichent sous le champ (↑ ↓ pour les parcourir, Entrée pour ouvrir, Échap pour fermer). Un clic ouvre le chapitre et surligne les mots concernés ; si le fichier a changé, relancer la recherche. Pour un élément sans mots annotables (code, image), le déplacement se fait au voisinage du passage, sans inventer une sélection éditable.
+Le bouton **Rechercher** de la barre du haut, qui devient un champ le temps de la recherche (Échap deux fois le referme), (Ctrl+Maj+F ; Ctrl+F reste celui du navigateur) cherche littéralement dans le Markdown projeté de tous les fichiers : vue Actuel en Relecture/Actuel, vue Proposé en Proposé. Les annotations et métadonnées CriticMarkup ne sont pas cherchées ; les signes Markdown, échappements et différences d'accents composés/décomposés restent pris en compte. Les majuscules sont ignorées, sauf option contraire. Le total est indiqué et les 200 premiers résultats contextualisés sont affichés. Les résultats s'affichent sous le champ (↑ ↓ pour les parcourir, Entrée pour ouvrir, Échap pour fermer). Un clic ouvre le chapitre et surligne les mots concernés ; si le fichier a changé, relancer la recherche. Pour un élément sans mots annotables (code, image), le déplacement se fait au voisinage du passage, sans inventer une sélection éditable.
 
 **Discussions closes.** Dans l'onglet **Navette**, choisir une main puis ouvrir une archive pour retrouver, dans un panneau de lecture, le texte d'origine, le texte proposé, la décision et les messages avec leur auteur. Les versions précédentes d'une proposition corrigée y figurent aussi. Ce sont les événements de cette main, pas une affirmation sur l'état présent : une décision a pu être annulée ensuite. Cette consultation ne réapplique rien au texte ; Échap ou la croix ferme le panneau.
 
@@ -191,3 +248,23 @@ Glose lit le Markdown avec pandoc, au format `commonmark_x` : CommonMark, plus l
 - **Pandoc** : 3.1 ou plus récent ; seule la 3.1.3 est essayée de façon suivie.
 - **Taille** : un ouvrage de 50 000 mots s'affiche en 1 à 1,5 s. Un gros ouvrage (243 000 mots) s'affiche partie par partie : le premier affichage d'un fichier prend une ou deux secondes, la réouverture moins d'une seconde grâce au cache, et une annotation ne refait que son fichier. Un très gros fichier (plus de 512 Ko, sans filtre) est rendu par sections, coupées devant ses titres : une annotation n'en refait qu'une (2 à 3 s pour un fichier de 240 000 mots) ; ses notes sont alors montrées à la fin de chaque section. Découper un tel fichier reste plus rapide.
 - **Fichiers créés ou supprimés par l'agent** : un fichier que l'agent crée pendant son tour, dans un dossier du texte, devient une proposition d'ajout de tout son contenu (le rejeter le laisse vide) ; l'interface l'affiche sans redémarrage. Un fichier qu'il supprime fait refuser `glose done` : il doit le restaurer (la copie est indiquée), puis proposer d'en vider le texte. Si vous ajoutez au profil, pendant le tour de l'agent, un fichier qui existait déjà, la remise est refusée : remettez ce changement de profil à votre prochain tour. Une remise couvre toujours le projet entier, même ouvert depuis un seul fichier.
+
+
+## Vue Depuis
+
+La quatrième vue compare le texte Actuel à la dernière remise de l’auteur. La liste Référence permet de choisir une remise plus ancienne dont toutes les copies sont disponibles. Les changements sont colorés au mot près ; le bilan par fichier montre aussi les suppressions et signale les fichiers apparus ou disparus. Cette vue est en lecture seule. Aucun fichier ni journal n’est écrit par la comparaison.
+
+
+## Règles typographiques
+
+`typo.json`, dans le dossier de configuration de Glose, est créé à la première utilisation. Il contient une liste de règles (`id`, `description`, `pattern`, `replacement`, `disabled`). Les motifs suivent la syntaxe des expressions régulières de Go ; les remplacements emploient `${1}` pour les groupes. Une règle invalide refuse le lancement, sans réécriture du fichier.
+
+Les règles par défaut corrigent les espaces avant `; : ! ? »` et après `«`, les guillemets droits sûrement appariés, l’espace avant un appel de note, les espaces après « art. » et « n° », et les trois points. Les plages doivent être certifiées. Code, citations, liens, macros, frontmatter, attributs et CriticMarkup sont exclus. En cas de doute, notamment de guillemets droits non appariés, aucune proposition n’est produite. Ce relecteur local déterministe n’appelle aucun modèle ni réseau.
+
+
+Le bouton **Typo** lance la relecture du fichier affiché choisi dans « Fichier pour Typo », seulement quand l’auteur a la main. Les corrections deviennent des propositions signées `via=Typo`, sans changer le texte Actuel. **Tout accepter (Typo)** demande confirmation et accepte uniquement ces propositions dans ce fichier ; les autres restent en attente. L’opération et chaque décision sont gardées dans le journal ; l’acceptation se défait avec Annuler. Le bouton est désactivé dans Depuis.
+
+
+## Mission des annotations
+
+Pendant le tour lancé par une consigne, les nouvelles propositions, commentaires, réponses et modifications libres converties portent `task=ID` dans leur commentaire technique. Les annotations antérieures restent inchangées ; une réponse peut porter une autre mission que la tête du fil. La carte affiche l’icône et le nom de la consigne conservés lors de la remise, ou son identifiant si la consigne est inconnue. Le menu Mission filtre la marge, y compris par mission d’une réponse. `glose list --task ID` donne les fils concernés ; `glose list --json` expose `task` sur les annotations et messages. Les décisions archivées conservent cette étiquette.

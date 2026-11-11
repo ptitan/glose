@@ -175,6 +175,7 @@ window.GloseAgents = (() => {
       recharger();
     }
     $('m-sortie').addEventListener('click', voirSortie);
+    $('voir-sortie').addEventListener('click', voirSortie);
     $('m-arreter').addEventListener('click', arreter);
     $('sortie-arreter').addEventListener('click', arreter);
     $('m-lancer').addEventListener('click', lancer);
@@ -187,6 +188,7 @@ window.GloseAgents = (() => {
       }
       const D = doc(), st = D && D.state, run = D && D.run;
       $('m-sortie').hidden = !run;
+      $('voir-sortie').hidden = !run; // P20: in the presence band too
       $('m-arreter').hidden = !(run && run.running);
       $('m-lancer').hidden = !(st && st.hand === 'agent' && D.textAgent && !(run && run.running));
       if (D && D.textAgent) $('m-lancer-texte').textContent = 'Lancer ' + D.textAgent.name;

@@ -2,7 +2,7 @@
 // decision action or reapplication to the manuscript.
 "use strict";
 window.GloseArchives = (() => {
-  const DECISIONS = { accept: 'Acceptée', reject: 'Rejetée', resolve: 'Discussion résolue', withdraw: 'Retirée', revise: 'Version précédente' };
+  const DECISIONS = { accept: 'Acceptée', reject: 'Rejetée', resolve: 'Discussion résolue', withdraw: 'Retirée', revise: 'Version précédente', direct: 'Modification directe' };
   const QUI = { author: 'Vous', agent: "L’agent", unknown: 'Auteur inconnu' };
   function el(tag, text, classe) {
     const n = document.createElement(tag); n.textContent = text;
@@ -16,9 +16,10 @@ window.GloseArchives = (() => {
     d.append(el('p', c.file + (c.id ? ' · ' + c.id : ''), 'archive-meta'));
     d.append(el('p', (QUI[c.by] || 'Auteur non renseigné') + ' · ' + (op.time ? new Date(op.time).toLocaleString('fr-FR') : ''), 'archive-meta'));
     const morceau = (titre, texte) => { d.append(el('h4', titre), el('pre', texte || '∅')); };
-    if (c.kind === 'substitution') { morceau('Texte d’origine', c.text); morceau('Texte proposé', c.new); }
-    else if (c.kind === 'addition') morceau('Ajout proposé', c.text);
-    else if (c.kind === 'deletion') morceau('Suppression proposée', c.text);
+    const directe = c.decision === 'direct'; // D-57: imposed, never proposed
+    if (c.kind === 'substitution') { morceau('Texte d’origine', c.text); morceau(directe ? 'Nouveau texte' : 'Texte proposé', c.new); }
+    else if (c.kind === 'addition') morceau(directe ? 'Texte ajouté' : 'Ajout proposé', c.text);
+    else if (c.kind === 'deletion') morceau(directe ? 'Texte supprimé' : 'Suppression proposée', c.text);
     else if (c.kind !== 'comment' || !(c.messages || []).length) morceau(c.kind === 'highlight' ? 'Passage commenté' : 'Message', c.text);
     if ((c.messages || []).length) {
       d.append(el('h4', 'Discussion'));

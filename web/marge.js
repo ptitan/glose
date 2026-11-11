@@ -26,12 +26,21 @@ window.GloseMarge = (() => {
     }
 
     function signature(message) {
-      const nom = message.by === "author" ? "Auteur" : message.via || QUI[message.by] || "";
+      const nom = message.via === "Typo" ? "Typo" : message.by === "author" ? "Auteur" : message.via || QUI[message.by] || "";
       const q = el("span", "qui " + ton(message));
       if (message.by === "author" || message.by === "agent") q.innerHTML = icone(message.by === "author" ? "vous" : "agent");
       q.append(document.createTextNode(nom + (message.model ? " · " + modeleCourt(message.model) : "")));
       if (message.model) q.dataset.infobulle = nom + " : " + message.model;
       return q;
+    }
+
+    function mission(id) {
+      const t = S.doc.taskLabels?.[id] || S.doc.tasks?.find(t => t.id === id);
+      const badge = el("span", "mission");
+      badge.innerHTML = icone(t?.icon || "agent");
+      badge.append(document.createTextNode(t?.name || id));
+      badge.dataset.task = id;
+      return badge;
     }
 
     function moment(annotation) {
@@ -61,6 +70,7 @@ window.GloseMarge = (() => {
       const meta = el("span", "meta");
       if (PROPOSITION[a.kind] || !a.messages.length) meta.append(signature(origine));
       meta.append(moment(a));
+      if (a.task) meta.append(mission(a.task));
       if (a.to) meta.append(destinataire(a.to));
       meta.append(el("span", "lieu", "l. " + a.line));
       c.append(tete, meta);
@@ -85,6 +95,7 @@ window.GloseMarge = (() => {
         const p = el("div", "msg " + ton(m));
         const tete = el("div", "msg-tete");
         tete.append(signature(m));
+        if (m.task) tete.append(mission(m.task));
         if (m !== origine || m.reply) tete.append(moment(m));
         if (m.by === "author" && m.to && m.reply) tete.append(destinataire(m.to));
         const corps = riche("div", "msg-texte", m.text);

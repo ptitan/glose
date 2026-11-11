@@ -16,6 +16,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -25,8 +26,10 @@ import (
 	"unicode/utf8"
 
 	"github.com/ptitan/glose/internal/agentrun"
+	"github.com/ptitan/glose/internal/agents"
 	"github.com/ptitan/glose/internal/critic"
 	"github.com/ptitan/glose/internal/edit"
+	"github.com/ptitan/glose/internal/journal"
 	"github.com/ptitan/glose/internal/navette"
 	"github.com/ptitan/glose/internal/notes"
 	"github.com/ptitan/glose/internal/patch"
@@ -183,7 +186,7 @@ func (s *Server) refresh() {
 	cur := s.cur().P
 	p, err := project.Load(cur.Source)
 	if err != nil || (sameStrings(p.Files, cur.Files) && p.Title == cur.Title && p.Filter == cur.Filter && p.CSS == cur.CSS &&
-		sameStrings(p.Resources, cur.Resources) && p.Pandoc == cur.Pandoc && p.PerFile == cur.PerFile) {
+		sameStrings(p.Resources, cur.Resources) && p.Pandoc == cur.Pandoc && p.PerFile == cur.PerFile && reflect.DeepEqual(p.Tasks, cur.Tasks)) {
 		return
 	}
 	s.curMu.Lock()
@@ -216,6 +219,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /static/polices/{name}", s.font)
 	mux.HandleFunc("GET /project.css", s.projectCSS)
 	mux.HandleFunc("GET /api/ping", s.ping)
+	mux.HandleFunc("GET /api/since", s.since)
 	mux.HandleFunc("GET /api/doc", s.doc)
 	mux.HandleFunc("GET /api/hashes", s.hashes)
 	mux.HandleFunc("POST /api/comment", s.comment)
@@ -227,6 +231,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/edit", s.editBlock)
 	mux.HandleFunc("POST /api/preview", s.preview)
 	mux.HandleFunc("POST /api/decide", s.decide)
+	mux.HandleFunc("POST /api/typo", s.typo)
 	mux.HandleFunc("POST /api/undecide", s.undecide)
 	mux.HandleFunc("POST /api/revise", s.revise)
 	mux.HandleFunc("POST /api/fix", s.applyFix)
@@ -451,6 +456,7 @@ func (s *Server) hashes(w http.ResponseWriter, r *http.Request) {
 	hand, since, turn := s.handAt(c, seq)
 	out := map[string]any{"files": files, "seq": seq, "filesGen": c.Gen, "agent": c.N.Agent(hand, since)}
 	ai := s.agentInfoOf(c, turn)
+	out["tasks"] = ai.Tasks
 	out["agentsConfigured"], out["textAgent"], out["textRequires"], out["run"] = ai.AgentsConfigured, ai.TextAgent, ai.TextRequires, ai.Run
 	out["passes"], out["aliases"], out["link"], out["owner"] = ai.Passes, ai.Aliases, ai.Link, ai.Owner
 	writeJSON(w, http.StatusOK, out)
@@ -458,6 +464,7 @@ func (s *Server) hashes(w http.ResponseWriter, r *http.Request) {
 
 // docResponse is the rendered project, with the state of the exchange.
 type docResponse struct {
+	TaskLabels map[string]missionLabel `json:"taskLabels"`
 	*render.Doc
 	State    navette.State `json:"state"`
 	Seq      int64         `json:"seq"`
@@ -504,7 +511,7 @@ func (s *Server) doc(w http.ResponseWriter, r *http.Request) {
 	if len(h.Events) > 0 {
 		seq = h.Events[len(h.Events)-1].Seq
 	}
-	writeJSON(w, http.StatusOK, docResponse{Doc: d, State: st, Seq: seq, FilesGen: c.Gen, agentInfo: s.agentInfoOf(c, st.Turn)})
+	writeJSON(w, http.StatusOK, docResponse{Doc: d, State: st, Seq: seq, FilesGen: c.Gen, TaskLabels: missionLabels(h), agentInfo: s.agentInfoOf(c, st.Turn)})
 }
 
 func (s *Server) state(w http.ResponseWriter, r *http.Request) {
@@ -530,8 +537,12 @@ func (s *Server) log(w http.ResponseWriter, r *http.Request) {
 }
 
 type handoffRequest struct {
-	Note  string `json:"note"`
-	Force bool   `json:"force"` // reclaim: without converting the agent's changes
+	TaskHash      string   `json:"taskHash"`
+	Task          string   `json:"task"`
+	Files         []string `json:"files"`
+	ConfirmAccess bool     `json:"confirmAccess"`
+	Note          string   `json:"note"`
+	Force         bool     `json:"force"` // reclaim: without converting the agent's changes
 	// Launch: launch the agent of the text (P10.5); absent, it is launched
 	// if one is configured and none listens.
 	Launch *bool `json:"launch"`
@@ -544,13 +555,36 @@ func (s *Server) handoff(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
+	var task *journal.TaskInfo
+	if req.Task != "" {
+		var err error
+		task, err = s.resolveTask(c, req.Task, req.Files)
+		if err != nil {
+			jsonError(w, 400, "task", err.Error())
+			return
+		}
+		if req.TaskHash != taskHash(task) {
+			jsonError(w, 409, "task-changed", "la consigne ou ses accès ont changé : choisissez-la de nouveau ; votre note est conservée")
+			return
+		}
+		if !req.ConfirmAccess {
+			jsonError(w, 400, "access", "confirmez les accès et leurs limites avant le lancement")
+			return
+		}
+		yes := true
+		req.Launch = &yes
+	}
 	s.handover(w, req, func(note string) (*navette.Handover, error) {
 		// What Glose launches is decided first; the plan of passes and the
 		// owner of the turn are written in the transaction of the handover,
 		// under the lock of the project: a bound session that waits sees
 		// them as soon as it can take the hand (P10.6, P10.9).
 		next := s.beforeHandoff(c, req.Launch)
-		ho, err := c.N.HandoffThen(review.Author, note, func(turn int) (func(), error) { return s.prepareTurn(c, &next, turn) })
+		if task != nil {
+			cfg, _ := agents.Load()
+			next = launchPlan{cfg: cfg, single: &task.Agent}
+		}
+		ho, err := c.N.HandoffTaskThen(note, task, func(turn int) (func(), error) { return s.prepareTurn(c, &next, turn) })
 		if err == nil {
 			s.afterHandoff(c, next)
 		}
@@ -729,6 +763,13 @@ func (s *Server) editAt(w http.ResponseWriter, r *http.Request, file int, hash s
 // passed to compute.
 func (s *Server) editWith(w http.ResponseWriter, r *http.Request, file int, hash string, at *critic.Span, kind, decision string,
 	compute func(src []byte, m *sourcemap.Map, gen *review.Gen, h *navette.History) (patch.Edit, *apiError)) {
+	s.editSpec(w, r, file, hash, at, &navette.Spec{Kind: kind, Decision: decision}, compute)
+}
+
+// editSpec is editWith, for the operation that spec describes; compute may
+// complete spec (navette.Run).
+func (s *Server) editSpec(w http.ResponseWriter, r *http.Request, file int, hash string, at *critic.Span, spec *navette.Spec,
+	compute func(src []byte, m *sourcemap.Map, gen *review.Gen, h *navette.History) (patch.Edit, *apiError)) {
 	c, ok := s.curFor(w, r)
 	if !ok {
 		return
@@ -744,7 +785,7 @@ func (s *Server) editWith(w http.ResponseWriter, r *http.Request, file int, hash
 	ctx, cancel := context.WithTimeout(r.Context(), time.Minute)
 	defer cancel()
 	var apiErr *apiError
-	res, err := c.N.DoWith(review.Author, file, hash, kind, decision, func(src []byte, gen *review.Gen, h *navette.History) (patch.Edit, error) {
+	res, err := c.N.Run(review.Author, file, hash, spec, func(src []byte, gen *review.Gen, h *navette.History) (patch.Edit, error) {
 		m, err := c.R.Map(ctx, file, store.Doc{Bytes: src, Hash: store.Hash(src)})
 		if err != nil {
 			apiErr = &apiError{status: http.StatusUnprocessableEntity, code: "render", message: err.Error()}
@@ -819,6 +860,8 @@ func message(err error) string {
 		return "l'annotation contient une annotation imbriquée : corrigez-la dans le fichier"
 	case errors.Is(err, patch.ErrArrow):
 		return "le texte supprimé contient « ~> » : il ne peut pas devenir un remplacement ; rejetez la proposition et proposez de nouveau"
+	case errors.Is(err, navette.ErrDirectMarks):
+		return "la modification toucherait une annotation existante : décidez-la d'abord, ou ajoutez une suggestion"
 	case errors.Is(err, patch.ErrKind):
 		return "seule une proposition (ajout, suppression, remplacement) se corrige"
 	}
@@ -938,6 +981,9 @@ type editRequest struct {
 	Text      string `json:"text"`
 	Note      string `json:"note"`  // optional message attached to the proposal
 	Whole     bool   `json:"whole"` // one proposal for the whole rewriting (D-32)
+	// Direct applies the rewriting to the text at once, without proposals
+	// (D-57): the author's own change, which the agent does not discuss.
+	Direct bool `json:"direct"`
 }
 
 // editBlock records the rewriting of a block as proposals.
@@ -951,6 +997,10 @@ func (s *Server) editBlock(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, http.StatusBadRequest, "text", "texte trop long ou mal encodé")
 		return
 	}
+	if req.Direct {
+		s.editDirect(w, r, req, note)
+		return
+	}
 	r, ok := withRecipient(w, r, req.Recipient)
 	if !ok {
 		return
@@ -960,6 +1010,39 @@ func (s *Server) editBlock(w http.ResponseWriter, r *http.Request) {
 		e, rng, apiErr := proposeEdit(req, note, src, m, gen)
 		main = rng
 		return e, apiErr
+	})
+}
+
+// editDirect applies a rewriting of the author to the text at once (D-57):
+// the proposals it would make are computed as for a suggestion, then
+// accepted in the same operation, so that no mark of them is ever written.
+// The journal keeps a copy of each change (decision « direct »). A message
+// for the agent asks for an answer: it goes with a suggestion, not with a
+// direct change. The change is undone like a decision (undecide).
+func (s *Server) editDirect(w http.ResponseWriter, r *http.Request, req editRequest, note string) {
+	if note != "" || req.Recipient != "" {
+		jsonError(w, http.StatusBadRequest, "note",
+			"une modification directe ne s'adresse pas à l'agent : retirez le message, ou ajoutez une suggestion")
+		return
+	}
+	spec := &navette.Spec{Kind: navette.Direct}
+	s.editSpec(w, r, req.File, req.Hash, nil, spec, func(src []byte, m *sourcemap.Map, gen *review.Gen, _ *navette.History) (patch.Edit, *apiError) {
+		e, _, apiErr := proposeEdit(req, "", src, m, gen)
+		if apiErr != nil {
+			return patch.Edit{}, apiErr
+		}
+		out, copies, err := navette.Impose(src, e.Apply(src))
+		if err != nil {
+			return patch.Edit{}, &apiError{status: http.StatusUnprocessableEntity, code: "refused", message: message(err)}
+		}
+		spec.Direct = copies
+		final := review.Diff(src, out)
+		ids := make([]string, 0, len(copies))
+		for _, c := range copies {
+			ids = append(ids, c.ID)
+		}
+		s.rememberDirect(req.File, src, final, ids)
+		return final, nil
 	})
 }
 
@@ -1043,6 +1126,7 @@ func (s *Server) preview(w http.ResponseWriter, r *http.Request) {
 }
 
 type decideRequest struct {
+	Via      string `json:"via,omitempty"`
 	File     int    `json:"file"`
 	Hash     string `json:"hash"`
 	Start    int    `json:"start"`
@@ -1059,10 +1143,14 @@ func (s *Server) decide(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &req) {
 		return
 	}
+	if req.Via != "" && req.Via != "Typo" {
+		jsonError(w, 400, "via", "signature de lot inconnue")
+		return
+	}
 	switch req.Decision {
 	case navette.Accept, navette.Reject:
 		s.edit(w, r, req.File, req.Hash, "decide", req.Decision, func(src []byte, _ *sourcemap.Map, _ *review.Gen) (patch.Edit, *apiError) {
-			e, err := navette.DecideRange(src, req.Start, req.End, req.Decision)
+			e, err := navette.DecideVia(src, req.Start, req.End, req.Decision, req.Via)
 			if err == nil {
 				s.remember(req.File, src, e)
 			}
@@ -1150,6 +1238,7 @@ type undoEntry struct {
 	hashAfter string
 	before    []byte
 	edit      patch.Edit // the decision itself, to check that undoing it touches nothing else
+	direct    []string   // a direct change (D-57): the identifiers of its copies in the journal
 }
 
 // maxUndos bounds the decisions kept for undo (the session of the interface).
@@ -1158,10 +1247,16 @@ const maxUndos = 50
 // remember keeps the state of the file before a decision. If the decision is
 // not written after all (conflict, turn), its entry never matches a hash.
 func (s *Server) remember(file int, src []byte, e patch.Edit) {
+	s.rememberDirect(file, src, e, nil)
+}
+
+// rememberDirect is remember, for a direct change of the author (D-57) when
+// ids is not empty: undoing it is recorded as such in the journal.
+func (s *Server) rememberDirect(file int, src []byte, e patch.Edit, ids []string) {
 	after := e.Apply(src)
 	s.undoMu.Lock()
 	defer s.undoMu.Unlock()
-	s.undos = append(s.undos, undoEntry{file: file, hashAfter: store.Hash(after), before: append([]byte(nil), src...), edit: e})
+	s.undos = append(s.undos, undoEntry{file: file, hashAfter: store.Hash(after), before: append([]byte(nil), src...), edit: e, direct: ids})
 	if len(s.undos) > maxUndos {
 		s.undos = s.undos[len(s.undos)-maxUndos:]
 	}
@@ -1204,7 +1299,8 @@ func (s *Server) undecide(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var at critic.Span
-	s.editAt(w, r, req.File, req.Hash, &at, "undo", "", func(src []byte, _ *sourcemap.Map, _ *review.Gen) (patch.Edit, *apiError) {
+	spec := &navette.Spec{Kind: navette.Undo, Reverted: u.direct}
+	s.editSpec(w, r, req.File, req.Hash, &at, spec, func(src []byte, _ *sourcemap.Map, _ *review.Gen, _ *navette.History) (patch.Edit, *apiError) {
 		// The inverse of the decision: what it wrote, replaced by what it removed.
 		inv := patch.Edit{Start: u.edit.Start, End: u.edit.Start + len(u.edit.Insert), Insert: u.before[u.edit.Start:u.edit.End]}
 		if !bytes.Equal(inv.Apply(src), u.before) {

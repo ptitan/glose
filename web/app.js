@@ -9,17 +9,17 @@
   // References captured before any text injection: a heading in the text
   // cannot be mistaken for them (its identifiers are also prefixed).
   const UI = {};
-  for (const id of ["bouton-sommaire", "titre", "etat", "annuler", "retablir", "anomalies", "bandeau", "sommaire",
+  for (const id of ["bouton-sommaire", "consignes-barre", "remise-consignes", "remise-consigne", "remise-fichiers", "remise-acces", "remise-blocages", "titre", "etat", "annuler", "retablir", "anomalies", "bandeau", "sommaire",
     "texte", "marge", "bouton-commenter", "poignee", "menu-bloc", "menu-commenter", "menu-suggerer", "saisie", "saisie-titre", "saisie-extrait",
     "saisie-texte", "saisie-message", "saisie-autre", "saisie-fermer", "saisie-ok", "saisie-annuler", "edition-annuler", "avis", "outils-bloc",
-    "edition", "edition-texte", "edition-message", "edition-ok", "edition-fermer",
+    "edition", "edition-texte", "edition-message", "edition-ok", "edition-direct", "edition-fermer",
     "bouton-reglages", "reglages", "r-police", "r-taille", "r-taille-val", "r-interligne", "r-interligne-val",
     "r-largeur", "r-largeur-val", "r-justifie", "r-defaut", "menu-selection", "bouton-suggerer", "edition-note",
     "edition-titre", "edition-info", "navette", "remettre", "remise", "remise-titre", "remise-info", "remise-alerte", "remise-lier", "remise-lancement", "remise-lancer", "remise-lancer-texte", "remise-outils", "saisie-pour-ligne", "edition-pour-ligne", "remise-note",
     "remise-message", "remise-ok", "remise-force", "remise-fermer", "edition-source", "edition-voir", "edition-apercu",
     "edition-rendu", "edition-changements", "edition-mef", "edition-visuel", "edition-outils", "edition-aide-source", "vues", "edition-elargir", "edition-types", "menu-avant", "menu-apres", "carte-tour", "puces", "navette-annonce", "rail", "rail-ouvrir", "boite", "boite-icone", "boite-titre", "boite-message", "boite-champs", "boite-erreur", "boite-ok", "boite-annuler", "edition-tenant", "edition-tenant-case",
     "onglets", "onglet-compte", "onglet-titre", "poignee-colonne", "cote", "app", "annotations", "filtres", "annotations-liste", "historique", "fichiers",
-    "bouton-brouillons", "brouillons-compte", "brouillons", "brouillons-contenu", "brouillons-fermer", "saisie-brouillon", "edition-brouillon", "avancement", "barre", "main-navette", "menu-navette", "ouvrir-recherche", "recherche", "recherche-texte", "remettre-court", "remettre-libelle", "reserve-barres", "resume-tour", "pied", "exporter", "export", "export-ok", "export-portee", "export-commentaires", "export-commentaires-ligne", "annotations-traitees", "r-theme"]) {
+    "bouton-brouillons", "brouillons-compte", "brouillons", "brouillons-contenu", "brouillons-fermer", "saisie-brouillon", "edition-brouillon", "avancement", "barre", "main-navette", "menu-navette", "ouvrir-recherche", "recherche", "recherche-texte", "remettre-court", "remettre-libelle", "reserve-barres", "portee", "pied", "exporter", "export", "export-ok", "export-portee", "export-commentaires", "export-commentaires-ligne", "annotations-traitees", "r-theme"]) {
     UI[id] = document.getElementById(id);
   }
   const $ = (id) => UI[id];
@@ -30,7 +30,7 @@
     // Text view (F3): relecture and actuel use the server's Actuel view,
     // propose uses its Proposé view; one rendering per server view is
     // kept to switch without waiting.
-    vue: ["relecture", "actuel", "propose"].includes(localStorage.getItem("glose-vue")) ? localStorage.getItem("glose-vue") : "relecture",
+    vue: ["relecture", "actuel", "propose", "depuis"].includes(localStorage.getItem("glose-vue")) ? localStorage.getItem("glose-vue") : "relecture",
     rendus: {}, zones: {}, zone: null,
   };
   // The container of the displayed rendering (one per server view, inside #texte).
@@ -351,9 +351,12 @@
     afficherPartie: choisirPartie, avis, amener: (cible) => amener(cible, Math.max(100, document.getElementById("barre").getBoundingClientRect().height + 24)) });
   const agents = GloseAgents.creer({ api, etat: () => S.doc && S.doc.state, avis, jeton: () => S.jeton, doc: () => S.doc,
     recharger: () => charger(true) });
-  const navette = GloseNavette.creer({ $, S, api, avis, el, icone, court, quand, agents, majBoutons, charger, saisieEnCours });
+  const navette = GloseNavette.creer({ $, S, api, avis, el, icone, court, quand, agents, majBoutons, charger, saisieEnCours, voirAnnotation: async (b) => {
+    await choisirPartie(b.file, () => { const i = S.doc.annotations.findIndex(a => S.doc.files[a.file].path === b.file && a.start === b.start); if (i >= 0) activer(i, true, true); });
+  } });
   const { majNavette } = navette;
   function saisieEnCours() {
+    if (S.vue === "depuis") { avis("La vue Depuis est en lecture seule."); return true; }
     const d = $("saisie").open ? $("saisie") : $("edition").open ? $("edition") : null;
     if (!d) return false;
     avis("Fermez d'abord la saisie en cours : son brouillon sera conservé.");
@@ -442,17 +445,18 @@
   // (F3). Relecture and Actuel share a rendering; Proposé has its own,
   // kept until the files or journal change.
   async function changerVue(v) {
-    if (v === S.vue || !["relecture", "actuel", "propose"].includes(v)) return false;
+    if ($("saisie").open || $("edition").open) { avis("Fermez la saisie avant de changer de vue."); return false; }
+    if (v === S.vue || !["relecture", "actuel", "propose", "depuis"].includes(v)) return false;
     S.vue = v;
     localStorage.setItem("glose-vue", v);
     majVues();
     if (!S.doc) return false;
-    const garde = S.rendus[vueServeur(v)];
+    const garde = v === "depuis" ? null : S.rendus[vueServeur(v)];
     if (garde && signature(garde) === signature(S.doc)) {
       S.generation++; // abandon an ongoing load for the other view
       afficher(garde, capturer(), -1);
     } else if (!(await charger(true))) return false;
-    avis("Vue « " + { relecture: "Relecture", actuel: "Actuel", propose: "Proposé" }[v] + " ».");
+    avis("Vue « " + { relecture: "Relecture", actuel: "Actuel", propose: "Proposé", depuis: "Depuis" }[v] + " ».");
     return true;
   }
 
@@ -512,11 +516,14 @@
       z.spans = S.spans; z.parFichier = S.parFichier;
     }
     texte.setAttribute("aria-busy", "false");
+    zone().querySelectorAll(".g-depuis").forEach(e => e.classList.remove("g-depuis"));
     anomalies();
+    majMissions();
     annoter();
     sommaire();
     majEtat();
     majBoutons();
+    majTypo();
     if (repere) restaurer(repere);
     disposerMaintenant();
     // The active card remains the same annotation. If it disappeared (decided):
@@ -531,11 +538,77 @@
         S.actif = suivantes.length ? suivantes[0] : -1;
       }
     }
+    if (S.vue === "depuis") afficherDepuis();
+    document.getElementById("depuis-choix").hidden = S.vue !== "depuis";
     if (S.actif >= 0 && S.actif < S.cartes.length) activer(S.actif, false, S.clavier, true);
     else desactiver();
     const iCarte = carteFocus ? S.cartes.findIndex((c) => cleAnnotation(c.a) === carteFocus) : -1;
     if (iCarte >= 0) S.cartes[iCarte].carte.focus({ preventScroll: true });
   }
+
+  function majMissions() {
+    const choix = document.getElementById("mission-filtre");
+    const ids = [...new Set(S.doc.annotations.flatMap(a => [a.task, ...a.messages.map(m => m.task)]).filter(Boolean))];
+    choix.replaceChildren(el("option", "", "Toutes")); choix.firstChild.value = "";
+    for (const id of ids) { const o = el("option", "", S.doc.taskLabels?.[id]?.name || id); o.value = id; choix.append(o); }
+    if (S.filtreMission && !ids.includes(S.filtreMission)) S.filtreMission = "";
+    choix.value = S.filtreMission || "";
+    // Shown only when there is something to filter (P20).
+    document.getElementById("mission-choix").hidden = !ids.length;
+  }
+  document.getElementById("mission-filtre").addEventListener("change", e => {
+    S.filtreMission = e.target.value; afficher(S.doc, capturer(), -1);
+  });
+
+  function majTypo() {
+    const choix = document.getElementById("typo-fichier"), avant = choix.value;
+    choix.replaceChildren(...S.doc.files.filter(f => f.shown).map(f => { const o = el("option", "", f.path); o.value = f.index; return o; }));
+    if ([...choix.options].some(o => o.value === avant)) choix.value = avant;
+    document.getElementById("typo-choix").hidden = choix.options.length < 2;
+    const interdit = S.vue === "depuis" || S.doc.state?.hand === "agent";
+    document.getElementById("typo-lancer").disabled = interdit || !choix.options.length;
+    document.getElementById("typo-accepter").hidden = interdit || !S.doc.annotations.some(a => a.via === "Typo" && a.file === Number(choix.value) && PROPOSITION[a.kind]);
+  }
+  document.getElementById("typo-fichier").addEventListener("change", majTypo);
+  document.getElementById("typo-lancer").addEventListener("click", async () => {
+    if (saisieEnCours() || S.ecriture) return;
+    S.ecriture = true; S.occupe++;
+    try {
+      const file = Number(document.getElementById("typo-fichier").value);
+      const r = await api("/api/typo", {file, hash:S.hashes[file]});
+      avis(r.ok ? "Les corrections de Typo sont proposées dans la marge." : r.data.message, !r.ok);
+      await charger(true);
+    } finally { S.ecriture = false; S.occupe--; }
+  });
+  document.getElementById("typo-accepter").addEventListener("click", () => {
+    const f = Number(document.getElementById("typo-fichier").value);
+    deciderTout(f, "accept", S.doc.annotations.filter(a => a.file === f && a.via === "Typo" && PROPOSITION[a.kind]).length, "Typo");
+  });
+
+  let generationDepuis = 0;
+  async function afficherDepuis() {
+    const gen = ++generationDepuis, doc = S.doc;
+    zone().querySelectorAll(".g-depuis").forEach(e => e.classList.remove("g-depuis"));
+    const r = await api("/api/since" + (S.referenceDepuis ? "?turn=" + S.referenceDepuis : ""));
+    if (gen !== generationDepuis || S.vue !== "depuis" || S.doc !== doc) return;
+    if (!r.ok) { avis(r.data.message || "La comparaison a échoué.", true); return; }
+    if (r.data.turn && (r.data.filesGen !== doc.filesGen || doc.files.some(f => f.hash && r.data.hashes[f.path] !== f.hash))) { avis("Le texte a changé pendant la comparaison : actualisation."); charger(true); return; }
+    const choix = document.getElementById("depuis-reference");
+    choix.replaceChildren(...r.data.references.map(ref => { const o = el("option", "", "Depuis le tour " + ref.turn); o.value = ref.turn; return o; }));
+    choix.value = String(r.data.turn);
+    const bilan = el("div", "depuis-bilan");
+    bilan.textContent = r.data.turn ? "Depuis le tour " + r.data.turn + " — lecture seule" : "Aucune copie de remise disponible.";
+    for (const c of r.data.changes) {
+      const f = doc.files.find(f => f.path === c.path);
+      if (f) for (const mot of S.parFichier.get(f.index) || []) if (mot.s < c.end && mot.e > c.start) mot.el.classList.add("g-depuis");
+      const ligne = el("p", "", c.path + " : ");
+      if (c.status) ligne.append(document.createTextNode(c.status === "appeared" ? "fichier apparu" : "fichier disparu"));
+      else { if (c.old) ligne.append(el("del", "", c.old)); if (c.new) ligne.append(el("ins", "", c.new)); }
+      bilan.append(ligne);
+    }
+    document.getElementById("marge").append(bilan);
+  }
+  document.getElementById("depuis-reference").addEventListener("change", e => { S.referenceDepuis = e.target.value; charger(true); });
 
   function indexer() {
     S.spans = Array.from(zone().querySelectorAll("span[data-g]"));
@@ -632,6 +705,11 @@
 
   function majEtat() {
     majNavette();
+    // P20: what is shown, under the title (the file, or how many).
+    const montres = S.doc.files.filter((f) => f.shown);
+    $("portee").textContent = montres.length === 1 ? montres[0].path
+      : montres.length === S.doc.files.length ? S.doc.files.length + " fichiers"
+      : montres.length + " fichiers affichés sur " + S.doc.files.length;
     const n = S.cartes.filter((c) => !c.cache).length;
     $("etat").textContent = S.doc.files.length + " fichier" + (S.doc.files.length > 1 ? "s" : "") + " · " +
       n + " annotation" + (n > 1 ? "s" : "") + " · rendu en " + S.doc.millis + " ms";
@@ -710,7 +788,12 @@
     marge.append(annotationsFermer);
     annotationsOuvrir.textContent = "Annotations (" + S.doc.annotations.length + ")";
     S.cartes = [];
+    if (S.vue === "depuis") return;
     S.doc.annotations.forEach((a, i) => {
+      if (S.filtreMission && a.task !== S.filtreMission && !a.messages.some(m => m.task === S.filtreMission)) {
+        const carte = el("div", "carte"); carte.hidden = true;
+        S.cartes.push({ a, badge:null, carte, cache:true, ailleurs:false }); return;
+      }
       // File not displayed (P6.8): nothing in the text or margin; the
       // annotation list retains it, and clicking opens its file.
       if (S.doc.files[a.file] && !S.doc.files[a.file].shown) {
@@ -1235,13 +1318,13 @@
   }
 
   // Batch decisions (F12): all proposals in a file.
-  async function deciderTout(f, decision, n) {
+  async function deciderTout(f, decision, n, via = "") {
     if (saisieEnCours()) return;
     if (S.ecriture) { avis("Une écriture est en cours : réessayez dans un instant."); return; }
     const verbe = decision === "accept" ? "Accepter" : "Rejeter";
     const accepter = decision === "accept";
     if (!(await boite({
-      titre: verbe + " " + (n > 1 ? "les " + n + " propositions" : "la proposition") + " ?",
+      titre: verbe + (via ? " (" + via + ")" : "") + " " + (n > 1 ? "les " + n + " propositions" : "la proposition") + " ?",
       message: (accepter ? "Le texte proposé remplacera l'original" : "Le texte d'origine restera") + " dans " + S.doc.files[f].path +
         ". Chaque décision est gardée au journal.",
       icone: accepter ? "tout-accepter" : "rejeter", ton: accepter ? "succes" : "danger",
@@ -1250,7 +1333,7 @@
     S.ecriture = true;
     S.occupe++;
     try {
-      const req = { file: f, hash: S.hashes[f], start: 0, end: Number.MAX_SAFE_INTEGER, decision };
+      const req = { file: f, hash: S.hashes[f], start: 0, end: Number.MAX_SAFE_INTEGER, decision, via };
       const r = await api("/api/decide", req);
       retenirDecision(r, req);
       if (r.ok) avis(n + " proposition" + (n > 1 ? "s" : "") + (decision === "accept" ? " acceptée" : " rejetée") + (n > 1 ? "s" : "") +
@@ -1310,10 +1393,11 @@
     const change = r.data.filesGen !== S.doc.filesGen || r.data.files.length !== S.doc.files.length ||
       r.data.files.some((f) => S.hashes[f.index] !== f.hash) || r.data.seq !== S.doc.seq;
     // Agent presence changes without anything else changing (P10.1).
-    const cle = (o) => JSON.stringify([o.agent || null, o.agentsConfigured, o.textAgent || null, o.textRequires || [], o.run || null, o.passes || null, o.aliases || [], o.link || null, o.owner || null]);
+    const cle = (o) => JSON.stringify([o.agent || null, o.agentsConfigured, o.tasks || [], o.textAgent || null, o.textRequires || [], o.run || null, o.passes || null, o.aliases || [], o.link || null, o.owner || null]);
     if (S.doc.state && cle({ ...r.data }) !== cle({ ...S.doc, agent: S.doc.state.agent })) {
       S.doc.state.agent = r.data.agent || null;
       S.doc.agentsConfigured = r.data.agentsConfigured;
+      S.doc.tasks = r.data.tasks || [];
       S.doc.textAgent = r.data.textAgent || null;
       S.doc.textRequires = r.data.textRequires || [];
       S.doc.run = r.data.run || null;
@@ -1388,7 +1472,7 @@
     // The keyboard reaches the handle too (key +): on the selected block, else
     // the first one read in the window; never during the agent's turn.
     poigneeAuClavier = () => {
-      if (document.body.classList.contains("main-agent")) return false;
+      if (S.vue === "depuis" || document.body.classList.contains("main-agent")) return false;
       const r = selectionDuTexte();
       let bloc = r && blocDe(r.startContainer);
       if (bloc && bloc.closest("table")) bloc = bloc.closest("table");
@@ -1521,7 +1605,7 @@
       else if (e.key === "+" && !e.ctrlKey && !e.metaKey && !e.altKey) { if (poigneeAuClavier()) e.preventDefault(); }
       else if (k === "c" && !e.ctrlKey && !e.metaKey && !e.altKey && selectionDuTexte()) { e.preventDefault(); commenterSelection(); }
       else if (k === "s" && !e.ctrlKey && !e.metaKey && !e.altKey && selectionDuTexte()) { e.preventDefault(); suggererSelection(); }
-      else if (/^[123]$/.test(k) && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); changerVue(["relecture", "actuel", "propose"][+k - 1]); }
+      else if (/^[123]$/.test(k) && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); changerVue(["relecture", "actuel", "propose", "depuis"][+k - 1]); }
       // Alt+1 to Alt+4: column tabs (by physical key:
       // Alt+digit produces another character on some keyboards).
       else if (e.altKey && !e.ctrlKey && !e.metaKey && /^Digit[1-4]$/.test(e.code)) {
@@ -1588,6 +1672,29 @@
     $("ouvrir-recherche").addEventListener("click", () => {
       document.body.classList.remove("barres-reduites"); mesurerBarres(); recherche.montrer();
     });
+    // "Plus" (P20): what no longer fits in narrower windows. Each item relays
+    // a click to the control it stands for, whose state it copies on opening.
+    const plus = document.getElementById("plus-bouton"), menuPlus = document.getElementById("plus-menu");
+    const ouvrirPlus = (ouvert) => {
+      for (const b of menuPlus.querySelectorAll("[data-relais]")) b.disabled = document.getElementById(b.dataset.relais).disabled;
+      menuPlus.hidden = !ouvert;
+      plus.setAttribute("aria-expanded", String(ouvert));
+      if (ouvert) { const premier = menuPlus.querySelector("button:not(:disabled)"); if (premier) premier.focus(); }
+    };
+    plus.addEventListener("click", () => ouvrirPlus(menuPlus.hidden));
+    menuPlus.addEventListener("click", (e) => {
+      const b = e.target.closest("[data-relais]");
+      if (!b) return;
+      ouvrirPlus(false);
+      document.getElementById(b.dataset.relais).click();
+    });
+    menuPlus.addEventListener("keydown", (e) => {
+      const items = [...menuPlus.querySelectorAll("button:not(:disabled)")], i = items.indexOf(document.activeElement);
+      if (e.key === "Escape") { e.preventDefault(); ouvrirPlus(false); plus.focus(); }
+      else if (e.key === "ArrowDown" && items.length) { e.preventDefault(); items[(i + 1) % items.length].focus(); }
+      else if (e.key === "ArrowUp" && items.length) { e.preventDefault(); items[(i - 1 + items.length) % items.length].focus(); }
+    });
+    document.addEventListener("click", (e) => { if (!menuPlus.hidden && !menuPlus.contains(e.target) && !plus.contains(e.target)) ouvrirPlus(false); });
     mesurerBarres();
     defile();
     if (S.jeton) chargerReglages();

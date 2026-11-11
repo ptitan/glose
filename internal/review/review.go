@@ -57,6 +57,7 @@ type Meta struct {
 	To, Via string
 	// Model is the model of the agent that wrote it (P10.11), when known.
 	Model string
+	Task  string // task= : mission that created this annotation or message
 }
 
 // modelRe is the form of the value of model= (as agents.CheckModel).
@@ -91,6 +92,9 @@ func (m Meta) Bytes() []byte {
 	}
 	if m.Model != "" {
 		b.WriteString(" model=" + m.Model)
+	}
+	if m.Task != "" {
+		b.WriteString(" task=" + m.Task)
 	}
 	b.WriteString(critic.Closer(critic.Comment))
 	return []byte(b.String())
@@ -134,6 +138,11 @@ func ParseMeta(text []byte) (Meta, error) {
 			m.By = v
 		case "fix":
 			m.Fix = v == "1"
+		case "task":
+			if !ValidName(v) {
+				return Meta{}, fmt.Errorf("mission invalide : %q", v)
+			}
+			m.Task = v
 		case "model":
 			if !modelRe.MatchString(v) {
 				return Meta{}, fmt.Errorf("modèle invalide : %q", v)
@@ -226,6 +235,7 @@ func (g *Gen) New() (string, error) {
 type Message struct {
 	ID, By  string
 	To, Via string       // Meta.To, Meta.Via
+	Task    string       // Meta.Task
 	Model   string       // Meta.Model
 	Fix     bool         // a correction of the proposal (Meta.Fix)
 	Mark    critic.Mark  // the comment
@@ -237,6 +247,7 @@ type Message struct {
 type Annotation struct {
 	ID, By  string
 	To, Via string // Meta.To, Meta.Via of the annotation
+	Task    string // Meta.Task of the annotation
 	Model   string // Meta.Model of the annotation
 	Kind    critic.Kind
 	Mark    critic.Mark  // the main mark
@@ -324,7 +335,7 @@ func Read(src []byte) *Doc {
 			s := marks[elems[i]].Span
 			a.Meta = &s
 			if m, ok := meta(elems[i]); ok {
-				a.ID, a.By, a.To, a.Via, a.Model = m.ID, m.By, m.To, m.Via, m.Model
+				a.ID, a.By, a.To, a.Via, a.Model, a.Task = m.ID, m.By, m.To, m.Via, m.Model, m.Task
 				if m.Re != "" {
 					d.Issues = append(d.Issues, Issue{s.Start, IssueMisplaced + " (identifiant de message en tête d'annotation)"})
 				}
@@ -333,7 +344,7 @@ func Read(src []byte) *Doc {
 			i++
 		}
 		for k := range a.Messages { // the head messages share the identity of the annotation
-			a.Messages[k].ID, a.Messages[k].By, a.Messages[k].To, a.Messages[k].Via, a.Messages[k].Model = a.ID, a.By, a.To, a.Via, a.Model
+			a.Messages[k].ID, a.Messages[k].By, a.Messages[k].To, a.Messages[k].Via, a.Messages[k].Model, a.Messages[k].Task = a.ID, a.By, a.To, a.Via, a.Model, a.Task
 			if a.Meta != nil {
 				a.Messages[k].Span.End = a.Meta.End
 			}
@@ -350,7 +361,7 @@ func Read(src []byte) *Doc {
 				msg.Meta = &s
 				msg.Span.End = s.End
 				if m, ok := meta(elems[i+1]); ok {
-					msg.ID, msg.By, msg.Fix, msg.To, msg.Via, msg.Model = m.ID, m.By, m.Fix, m.To, m.Via, m.Model
+					msg.ID, msg.By, msg.Fix, msg.To, msg.Via, msg.Model, msg.Task = m.ID, m.By, m.Fix, m.To, m.Via, m.Model, m.Task
 					use(m.ID, s.Start)
 					if m.Re != "" && a.ID != "" && m.Re != a.ID {
 						d.Issues = append(d.Issues, Issue{s.Start, IssueMoved + " : " + m.ID})
@@ -805,7 +816,7 @@ func Fix(src []byte, id, text, by string, gen *Gen) (patch.Edit, int, error) {
 			if m.Span.Start != at || m.Meta == nil {
 				continue
 			}
-			meta := Meta{ID: m.ID, Re: ann.ID, By: by, Fix: true, To: m.To, Via: m.Via, Model: m.Model}.Bytes()
+			meta := Meta{ID: m.ID, Re: ann.ID, By: by, Fix: true, To: m.To, Via: m.Via, Model: m.Model, Task: m.Task}.Bytes()
 			fixed := patch.Edit{Start: m.Meta.Start, End: m.Meta.End, Insert: meta}.Apply(out)
 			if err := SameButMeta(out, fixed); err != nil {
 				return patch.Edit{}, 0, err
@@ -1029,6 +1040,22 @@ func stamp(src []byte, e patch.Edit, name string, f func(*Meta)) (patch.Edit, er
 	}
 	out := e.Apply(src)
 	res, err := setMeta(out, created(src, out), f)
+	if err != nil {
+		return patch.Edit{}, err
+	}
+	return Diff(src, res), nil
+}
+
+// LabelTask labels only identities created by e; existing metadata stays intact.
+func LabelTask(src []byte, e patch.Edit, task string) (patch.Edit, error) {
+	if task == "" {
+		return e, nil
+	}
+	if !ValidName(task) {
+		return patch.Edit{}, fmt.Errorf("mission invalide : %q", task)
+	}
+	out := e.Apply(src)
+	res, err := setMeta(out, created(src, out), func(m *Meta) { m.Task = task })
 	if err != nil {
 		return patch.Edit{}, err
 	}

@@ -19,6 +19,13 @@ const body = (n) => `Texte ${n} du chapitre, qui suit la section et remplit l’
 const chapter = '# Chapitre\n\n## Première section\n\n' + Array.from({ length: 40 }, (_, i) => body(i + 1)).join('') + '## Seconde section\n\nFin.\n';
 
 const scenarios = [
+  ["missions : cartes et filtre de marge", require("./missions.cjs")],
+  ["Typo : propositions et acceptation filtrée", require("./typo.cjs")],
+  ["vue Depuis en lecture seule", require("./since.cjs")],
+  ['consignes : création, accès, confirmation et retrait', require('./tasks.cjs')],
+  ['consignes : refus limité à la portée', require('./task-blocks.cjs')],
+  ['avancement de l’agent par la commande progress', require('./agent-progress.cjs')],
+  ['réglages et projets : colonne en fenêtre étroite', require('./space-width.cjs')],
   ['cartes de la marge en face de leur annotation après chaque écriture', async ({ p, page }) => {
     const A = Buffer.from(chapter).indexOf('## Première section') + Buffer.byteLength('## Première section');
     const B = Buffer.from(chapter).indexOf('\n\n', Buffer.from(chapter).indexOf('Texte 8 ')); // end of a paragraph further down
@@ -110,7 +117,7 @@ if (require.main === module) test('Glose dans Firefox isolé', { timeout: 180000
         await fs.writeFile(path.join(dir, 'echec.json'), JSON.stringify({ scenario: name, error: err.stack, exceptions: page && page.errors, server: p.log }, null, 2)).catch(() => {});
         throw err;
       } finally {
-        if (page) await page.close().catch(() => {});
+        if (page) { await page.evaluate(() => document.fonts.ready.then(() => true)).catch(() => {}); await page.close().catch(() => {}); }
         await p.stop();
       }
     });

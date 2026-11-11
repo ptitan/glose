@@ -73,6 +73,12 @@ async function savedDraft(page, id) {
   await page.wait('brouillon confirmé', (id) => document.getElementById(id).textContent.startsWith('Brouillon sauvegardé') && !document.getElementById(id).classList.contains('erreur'), id);
 }
 async function waitCards(page, count) { await page.wait(`${count} cartes`, (n) => document.querySelectorAll('#marge .carte').length === n && document.getElementById('texte').getAttribute('aria-busy') === 'false', count); }
+// P20: search is a button (in « Plus » in narrower windows) that becomes the field.
+async function openSearch(page) {
+  if (await page.evaluate(() => document.getElementById('ouvrir-recherche').getClientRects().length > 0)) await page.click('#ouvrir-recherche');
+  else { await page.click('#plus-bouton'); await page.click('#plus-menu [data-relais="ouvrir-recherche"]'); }
+  await page.wait('champ de recherche', () => document.activeElement.id === 'recherche-texte');
+}
 async function openDrafts(page) { await page.click('#bouton-brouillons'); await page.wait('liste des brouillons', () => document.getElementById('brouillons').open); }
 async function focusText(page) { await page.evaluate(() => document.getElementById('texte').focus()); }
 async function rejectAll(page) {
@@ -83,6 +89,13 @@ async function rejectAll(page) {
 }
 
 const scenarios = [
+  ["missions : cartes et filtre de marge", require("./missions.cjs")],
+  ["Typo : propositions et acceptation filtrée", require("./typo.cjs")],
+  ["vue Depuis en lecture seule", require("./since.cjs")],
+  ['consignes : création, accès, confirmation et retrait', require('./tasks.cjs')],
+  ['consignes : refus limité à la portée', require('./task-blocks.cjs')],
+  ['avancement de l’agent par la commande progress', require('./agent-progress.cjs')],
+  ['réglages et projets : colonne en fenêtre étroite', require('./space-width.cjs')],
   ['sélection, élargissement et octets originaux', async ({ p, page }) => {
     // BOM, CRLF and multibyte characters: never compare a normalized document.
     const original = Buffer.from('\ufeff' + ordinary.replaceAll('\n', '\r\n'));
@@ -162,7 +175,8 @@ const scenarios = [
     await page.wait('barre collante', () => Math.abs(document.getElementById('barre').getBoundingClientRect().top) < 1 && document.body.classList.contains('defile'));
     await page.evaluate(() => { document.getElementById('texte').style.minHeight = ''; window.scrollTo(0, 0); });
     // Recherche : la saisie reste dans le champ ; flèches, Entrée, Échap.
-    await page.click('#recherche-texte'); await page.fill('#recherche-texte', 'chat');
+    assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('.ancre-recherche')).display), 'none', 'le champ n’apparaît qu’à la demande');
+    await openSearch(page); await page.fill('#recherche-texte', 'chat');
     await page.wait('résultats sous le champ', () => !document.getElementById('recherche').hidden && document.querySelectorAll('.resultat-recherche').length === 1);
     assert.equal(await page.evaluate(() => document.activeElement.id), 'recherche-texte', 'la saisie reste dans le champ');
     await page.key('ArrowDown');
@@ -173,6 +187,9 @@ const scenarios = [
     await page.wait('Entrée relance', () => !document.getElementById('recherche').hidden && document.querySelectorAll('.resultat-recherche').length === 1);
     await page.key('ArrowDown'); await page.key('Enter');
     await page.wait('résultat ouvert', () => document.getElementById('recherche').hidden && document.querySelector('#texte .g-recherche')?.textContent === 'chat');
+    // Two Escapes: the list, then the field, which gives way to the button again.
+    await openSearch(page); await page.key('Escape'); await page.key('Escape');
+    await page.wait('champ refermé', () => !document.body.classList.contains('recherche-ouverte'));
   }],
   ['édition visuelle, source, aperçu, décisions et annulation', async ({ p, page }) => {
     const original = await p.read();
@@ -226,6 +243,31 @@ const scenarios = [
     await page.key('z', 2); await waitCards(page, 1);
     await focusText(page); await page.key('j'); await page.key('x'); await waitCards(page, 0);
     assert.deepEqual(await p.read(), original, 'rejeter restitue les octets d’origine');
+  }],
+  ['modification directe : sans proposition, annulée puis rétablie (D-57)', async ({ p, page }) => {
+    const original = Buffer.from('﻿' + ordinary.replaceAll('\n', '\r\n'));
+    await p.write(original); await page.navigate(p.state.url);
+    await openEdit(page, 'Le chat dort.'); await page.click('#edition-source');
+    await page.fill('#edition-texte', 'Le chien dort bien.');
+    // A message for the agent asks for an answer: no direct change with it.
+    await page.fill('#edition-note', 'Pourquoi ?');
+    await page.wait('bouton désactivé par le message', () => document.getElementById('edition-direct').disabled);
+    await page.fill('#edition-note', '');
+    await page.wait('bouton rétabli', () => !document.getElementById('edition-direct').disabled);
+    await page.click('#edition-direct');
+    await page.wait('modification appliquée', () => !document.getElementById('edition').open); await waitCards(page, 0);
+    const expected = Buffer.from(original.toString().replace('Le chat dort.', 'Le chien dort bien.'));
+    assert.deepEqual(await p.read(), expected, 'texte modifié, aucune marque, autres octets intacts');
+    await page.click('#onglet-annotations');
+    await page.wait('« Imposé » dans Traitées', () => document.getElementById('annotations-traitees').textContent.includes('Imposé'));
+    await focusText(page); await page.key('z', 2);
+    await page.wait('annulée', () => document.querySelector('#texte').textContent.includes('Le chat dort.'));
+    assert.deepEqual(await p.read(), original, 'annuler rend les octets d’origine');
+    await page.wait('sortie de Traitées', () => !document.getElementById('annotations-traitees').textContent.includes('Imposé'));
+    await page.key('y', 2);
+    await page.wait('rétablie', () => document.querySelector('#texte').textContent.includes('Le chien dort bien.'));
+    assert.deepEqual(await p.read(), expected);
+    assert.match(p.cli('status').toString(), /Modifications imposées par l'auteur : 2/);
   }],
   ['changement externe pendant une saisie et conflit conservé', async ({ p, page }) => {
     await openEdit(page, 'Le chat dort.'); await page.click('#edition-source');
@@ -965,6 +1007,66 @@ const scenarios = [
     await page.click('#fichiers ul.tete a.partie');
     await page.wait('tout le projet', () => document.querySelectorAll('.glose-file').length === 2);
   }],
+  ['barre du lecteur P20 : trois bandes, « Plus » aux largeurs moyennes, options utiles seulement', async ({ p, page }) => {
+    try {
+      for (const w of [1440, 1366, 1100, 960]) {
+        await page.send('Emulation.setDeviceMetricsOverride', { width: w, height: 800, deviceScaleFactor: 1, mobile: false });
+        await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+        const m = await page.evaluate(() => {
+          const vu = (id) => document.getElementById(id).getClientRects().length > 0;
+          const barre = document.getElementById('barre');
+          const dehors = [...barre.querySelectorAll('button, select, a, h1')].filter((e) => e.getClientRects().length && e.getBoundingClientRect().right > innerWidth + 0.5).map((e) => e.id || e.textContent);
+          return { dehors, large: document.documentElement.scrollWidth - document.documentElement.clientWidth, annuler: vu('annuler'), plus: vu('plus-bouton'),
+            mission: vu('mission-choix'), typo: vu('typo-choix'), sortie: vu('voir-sortie'), portee: document.getElementById('portee').textContent };
+        });
+        assert.deepEqual([m.dehors, m.large], [[], 0], w + ' : rien ne déborde');
+        assert.equal(m.annuler, w > 1280, w + ' : Annuler dans la barre au-delà de 1280 px');
+        assert.equal(m.plus, w <= 1280, w + ' : « Plus » à 1280 px et moins');
+        assert.deepEqual([m.mission, m.typo, m.sortie, m.portee], [false, false, false, 'a.md'], w + ' : options masquées quand elles ne servent pas');
+      }
+      // « Plus » relaie Annuler et en recopie l'état.
+      await page.send('Emulation.setDeviceMetricsOverride', { width: 1100, height: 800, deviceScaleFactor: 1, mobile: false });
+      await page.click('#plus-bouton');
+      await page.wait('menu « Plus » ouvert', () => !document.getElementById('plus-menu').hidden);
+      assert.equal(await page.evaluate(() => document.querySelector('#plus-menu [data-relais="annuler"]').disabled), true, 'Annuler désactivé comme l’original');
+      await page.key('Escape');
+      await page.wait('menu refermé, focus rendu', () => document.getElementById('plus-menu').hidden && document.activeElement.id === 'plus-bouton');
+      await openComment(page, 'Le chat dort.'); await page.fill('#saisie-texte', 'Une remarque.'); await page.click('#saisie-ok'); await waitCards(page, 1);
+      await page.click('#plus-bouton');
+      await page.click('#plus-menu [data-relais="annuler"]');
+      await waitCards(page, 0);
+      assert.equal((await p.read()).toString(), ordinary, 'annulé par « Plus » : octets d’origine');
+    } finally {
+      await page.send('Emulation.clearDeviceMetricsOverride');
+    }
+  }],
+  ['consignes P20 : interrupteurs, segments et aides des accès, enregistrés puis relus', async ({ p, page }) => {
+    const set = new URL('/set#t=' + p.state.token, p.state.url).href;
+    await page.navigate(set, '#ra-statut');
+    await page.wait('accès affichés', () => document.querySelectorAll('#ra-acces [role=switch]').length === 3);
+    const champDossiers = () => page.evaluate(() => document.querySelector('#ra-acces textarea').closest('.ra-champ').hidden);
+    assert.equal(await champDossiers(), true, 'liste des dossiers masquée sans dossier choisi');
+    await page.evaluate(() => {
+      document.querySelector('#ra-acces [role=switch]').click();
+      [...document.querySelectorAll('#ra-acces .ra-segments button')].find((b) => b.textContent === 'Python').click();
+      [...document.querySelectorAll('#ra-acces .ra-segments button')].find((b) => b.textContent === 'Dossiers choisis').click();
+    });
+    assert.equal(await champDossiers(), false, 'liste des dossiers montrée');
+    await page.fill('#ra-acces textarea', 'docs');
+    await page.fill('#ra-acces input', 'zotero, juridique');
+    assert.match(await page.evaluate(() => document.getElementById('ra-statut').textContent), /attendent votre enregistrement/);
+    // Une aide se lit au focus, sans clic.
+    await page.evaluate(() => document.querySelector('#ra-acces .ra-info').focus());
+    await page.key('Tab', 0); await page.evaluate(() => document.querySelector('#ra-acces .ra-info').focus());
+    assert.equal(await page.evaluate(() => getComputedStyle(document.querySelector('#ra-acces .ra-bulle')).visibility), 'visible');
+    await page.click('#ra-enregistrer');
+    await page.wait('enregistré', () => /^Enregistré/.test(document.getElementById('ra-statut').textContent));
+    const acces = await page.evaluate(async (t) => (await (await fetch('/api/agents', { headers: { 'X-Glose-Token': t } })).json()).config.access, p.state.token);
+    assert.deepEqual([acces.web, !!acces.subagents, acces.scripts, acces.externalDirs, acces.dirs, acces.mcp], [true, false, 'python', 'list', ['docs'], ['zotero', 'juridique']]);
+    await page.navigate(set, '#ra-statut');
+    await page.wait('accès relus', () => document.querySelector('#ra-acces [role=switch]')?.getAttribute('aria-checked') === 'true' &&
+      document.querySelector('#ra-acces .ra-segments button[aria-pressed=true]')?.textContent === 'Python');
+  }],
   ['réduction des barres à 1366 × 768 : hauteur de texte, sans saut (P12.3)', async ({ p, page }) => {
     await p.stop();
     await p.write('# Titre\n\n' + 'Un paragraphe ordinaire, pour faire défiler le texte de cette page assez longtemps.\n\n'.repeat(80));
@@ -1252,7 +1354,7 @@ const scenarios = [
     await page.click('#onglet-fichiers');
     await page.evaluate(() => [...document.querySelectorAll('#fichiers a.partie')].find((a) => a.textContent === 'a').click());
     await page.wait('recherche depuis a', () => document.querySelector('#texte .rendu:not(.garde) .glose-file')?.dataset.path === 'a.md');
-    await page.click('#recherche-texte');
+    await openSearch(page);
     await page.fill('#recherche-texte', 'CIBLE INTROUVABLE');
     await page.wait('résultat global', () => document.querySelectorAll('.resultat-recherche').length === 1);
     if (process.env.GLOSE_KEEP_BROWSER_TESTS === '1') await fs.writeFile(path.join(p.dir, 'recherche.png'), Buffer.from((await page.send('Page.captureScreenshot')).data, 'base64'));
@@ -1319,7 +1421,7 @@ if (require.main === module) test('Glose dans un navigateur isolé', { timeout: 
         }
         throw err;
       } finally {
-        if (page) await page.close().catch(() => {});
+        if (page) { await page.evaluate(() => document.fonts.ready.then(() => true)).catch(() => {}); await page.close().catch(() => {}); }
         await p.stop();
       }
     });

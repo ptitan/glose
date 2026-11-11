@@ -68,6 +68,15 @@ func (n *Navette) Reclaim(note string, force bool) (*Handover, error) {
 // handover runs a handover for the turn of owner (whose changes are
 // processed), recorded as done by actor.
 func (n *Navette) handover(actor, owner, note string, reclaimed, force bool, expect int, then func(next int) (func(), error)) (*Handover, error) {
+	return n.handoverTask(actor, owner, note, reclaimed, force, expect, then, nil)
+}
+
+// HandoffTaskThen records the selected task in the same event as the handover.
+func (n *Navette) HandoffTaskThen(note string, task *journal.TaskInfo, then func(int) (func(), error)) (*Handover, error) {
+	return n.handoverTask(review.Author, review.Author, note, false, false, 0, then, task)
+}
+
+func (n *Navette) handoverTask(actor, owner, note string, reclaimed, force bool, expect int, then func(int) (func(), error), task *journal.TaskInfo) (*Handover, error) {
 	lock, err := n.Lock(lockWait)
 	if err != nil {
 		return nil, err
@@ -89,7 +98,7 @@ func (n *Navette) handover(actor, owner, note string, reclaimed, force bool, exp
 	if err != nil {
 		return nil, err
 	}
-	return New(sc).locked(h, actor, owner, note, reclaimed, force, then)
+	return New(sc).lockedTask(h, actor, owner, note, reclaimed, force, then, task)
 }
 
 // Scope returns the project that a handover covers (D-38): the project read
@@ -140,6 +149,10 @@ func (n *Navette) Scope(h *History) (*project.Project, error) {
 
 // locked runs a handover under the lock, n being the scope of the handover.
 func (n *Navette) locked(h *History, actor, owner, note string, reclaimed, force bool, then func(next int) (func(), error)) (*Handover, error) {
+	return n.lockedTask(h, actor, owner, note, reclaimed, force, then, nil)
+}
+
+func (n *Navette) lockedTask(h *History, actor, owner, note string, reclaimed, force bool, then func(int) (func(), error), task *journal.TaskInfo) (*Handover, error) {
 	if h.Hand() != owner {
 		if owner == review.Author {
 			return nil, ErrAgentTurn
@@ -152,6 +165,23 @@ func (n *Navette) locked(h *History, actor, owner, note string, reclaimed, force
 			return nil, fmt.Errorf("%w : %s : %v", ErrFiles, n.P.Files[i], err)
 		}
 	}
+	if task != nil {
+		known := map[string]bool{}
+		for _, p := range n.P.Files {
+			known[p] = true
+		}
+		if len(task.Files) == 0 {
+			return nil, fmt.Errorf("consigne : aucun fichier choisi")
+		}
+		for _, p := range task.Files {
+			if !known[p] {
+				return nil, fmt.Errorf("consigne : fichier hors du texte : %s", p)
+			}
+		}
+		if blocks := n.TaskBlocks(task, f); len(blocks) > 0 {
+			return nil, fmt.Errorf("%s", blocks[0].Message)
+		}
+	}
 	res := &Handover{}
 	gen := n.Gen(f, h)
 
@@ -162,6 +192,13 @@ func (n *Navette) locked(h *History, actor, owner, note string, reclaimed, force
 			return nil, err
 		}
 		if len(changes) > 0 {
+			for i, c := range changes {
+				e, err := review.LabelTask(c.Before, review.Diff(c.Before, c.After), h.ActiveTask())
+				if err != nil {
+					return nil, err
+				}
+				changes[i].After = e.Apply(c.Before)
+			}
 			if err := n.Commit(review.Agent, "track", "", note, changes); err != nil {
 				return nil, err
 			}
@@ -180,6 +217,13 @@ func (n *Navette) locked(h *History, actor, owner, note string, reclaimed, force
 		if err != nil {
 			return nil, fmt.Errorf("%s : %w", n.P.Files[i], err)
 		}
+		if owner == review.Agent {
+			e, err := review.LabelTask(d.Bytes, review.Diff(d.Bytes, out), h.ActiveTask())
+			if err != nil {
+				return nil, err
+			}
+			out = e.Apply(d.Bytes)
+		}
 		if string(out) != string(d.Bytes) {
 			res.Identified += len(review.Read(out).IDs()) - len(review.Read(d.Bytes).IDs())
 			changes = append(changes, Change{File: i, Before: d.Bytes, After: out})
@@ -197,7 +241,7 @@ func (n *Navette) locked(h *History, actor, owner, note string, reclaimed, force
 	}
 
 	// The copy of the files handed over, and the turn event.
-	info := &journal.TurnInfo{Number: h.Turn(), Note: note, Counts: map[string]int{}, Reclaimed: reclaimed}
+	info := &journal.TurnInfo{Number: h.Turn(), Note: note, Task: task, Counts: map[string]int{}, Reclaimed: reclaimed}
 	// The inventory of the files that exist now: a file of a later scope
 	// that is not in it was created afterwards (D-38).
 	if inv, ok := project.Inventory(n.P.Root, n.P.Files); ok {
@@ -326,4 +370,36 @@ func (n *Navette) reread(before *Files, changes []Change) (*Files, error) {
 		}
 	}
 	return f, nil
+}
+
+// TaskBlock describes the first active annotation in a scoped file.
+type TaskBlock struct {
+	File    string `json:"file"`
+	Start   int    `json:"start"`
+	Message string `json:"message"`
+}
+
+// TaskBlocks shares wording between the preview and the locked handover.
+func (n *Navette) TaskBlocks(task *journal.TaskInfo, f *Files) []TaskBlock {
+	var out []TaskBlock
+	if task == nil || task.WhenAnnotations == "process" {
+		return out
+	}
+	for _, path := range task.Files {
+		for i, name := range n.P.Files {
+			if name != path || len(f.Annot[i]) == 0 {
+				continue
+			}
+			label := "Ce fichier"
+			if len(task.Files) > 1 {
+				label += " (« " + path + " »)"
+			}
+			msg := fmt.Sprintf("%s a %d annotations en cours : tranchez-les avant de lancer cette consigne", label, len(f.Annot[i]))
+			if len(f.Annot[i]) == 1 {
+				msg = label + " a 1 annotation en cours : tranchez-la avant de lancer cette consigne"
+			}
+			out = append(out, TaskBlock{path, f.Annot[i][0].Start, msg})
+		}
+	}
+	return out
 }

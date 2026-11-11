@@ -73,7 +73,10 @@ type Op struct {
 	// Revised holds the previous version of the proposals corrected by the
 	// operation (P3.2): same identity, another proposed text.
 	Revised []Closed `json:"revised,omitempty"`
-	Note    string   `json:"note,omitempty"`
+	// Reverted names the direct changes of the author (decision « direct »,
+	// D-57) that this operation undoes.
+	Reverted []string `json:"reverted,omitempty"`
+	Note     string   `json:"note,omitempty"`
 }
 
 // FileState is the hash of a file before and after an operation (paths are
@@ -86,18 +89,23 @@ type FileState struct {
 
 // Closed is the copy of an annotation closed by a decision (SPEC F11).
 type Closed struct {
+	Task     string    `json:"task,omitempty"`
 	ID       string    `json:"id"`
 	File     string    `json:"file"`
-	Decision string    `json:"decision"` // accept, reject, resolve, withdraw (revise: a previous version)
+	Decision string    `json:"decision"` // accept, reject, resolve, withdraw, direct (revise: a previous version)
 	Kind     string    `json:"kind"`
 	By       string    `json:"by,omitempty"`
 	Text     string    `json:"text"`
 	New      string    `json:"new,omitempty"`
 	Messages []Message `json:"messages,omitempty"`
+	// Line is, for a direct change (D-57), the line where it lies in the
+	// file just after it.
+	Line int `json:"line,omitempty"`
 }
 
 // Message is a message of a closed thread.
 type Message struct {
+	Task string `json:"task,omitempty"`
 	ID   string `json:"id,omitempty"`
 	By   string `json:"by,omitempty"`
 	Text string `json:"text"`
@@ -105,6 +113,7 @@ type Message struct {
 
 // TurnInfo is the content of a turn event: an actor hands the text over.
 type TurnInfo struct {
+	Task      *TaskInfo      `json:"task,omitempty"`
 	Number    int            `json:"number"` // the turn that ends, from 1
 	Note      string         `json:"note,omitempty"`
 	Files     []FileHash     `json:"files"`         // the files handed over

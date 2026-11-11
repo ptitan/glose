@@ -350,3 +350,44 @@ func agentModel(p *project.Project, name string) string {
 	}
 	return ""
 }
+
+// cmdProgress reports an agent step without touching a manuscript or journal.
+func cmdProgress(args []string, stdout, stderr io.Writer) int {
+	var text, agent string
+	path, ok := parse("progress", args, stderr, func(fs *flag.FlagSet) {
+		fs.StringVar(&text, "text", "", "")
+		fs.StringVar(&agent, "agent", "", "")
+	})
+	if !ok {
+		return ExitUsage
+	}
+	if err := navette.CheckProgress(text); err != nil {
+		return usageError(stderr, err.Error())
+	}
+	name, _, err := agentIdentity(agent)
+	if err != nil {
+		return usageError(stderr, err.Error())
+	}
+	p, err := project.Load(path)
+	if err != nil {
+		return failure(stderr, err)
+	}
+	// The same project lock serializes the turn check with handovers.
+	lk, err := store.WaitLock(context.Background(), p.State())
+	if err != nil {
+		return failure(stderr, err)
+	}
+	defer lk.Unlock()
+	h, err := navette.New(p).History()
+	if err != nil {
+		return failure(stderr, err)
+	}
+	if h.Hand() != review.Agent {
+		return failure(stderr, navette.ErrNotYourTurn)
+	}
+	if err := navette.Progress(p.State(), name, h.Turn(), text); err != nil {
+		return failure(stderr, err)
+	}
+	fmt.Fprintln(stdout, "Avancement : "+text)
+	return ExitOK
+}

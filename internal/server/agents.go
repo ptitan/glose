@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -76,6 +78,7 @@ func (s *Server) agentRoutes(mux *http.ServeMux) {
 // runRoutes are the routes of the agent launched by Glose (P10.5), on the
 // server of a project only.
 func (s *Server) runRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/tasks/preview", s.taskPreview)
 	mux.HandleFunc("GET /api/agent/run", s.agentRun)
 	mux.HandleFunc("GET /api/agent/log", s.agentLog)
 	mux.HandleFunc("POST /api/agent/stop", s.agentStop)
@@ -134,9 +137,10 @@ func projectRoot(p *project.Project) string {
 // tryRequest names the pair to try: a saved alias, or the agent and model
 // of a line of the page not saved yet.
 type tryRequest struct {
-	Name  string `json:"name"`
-	Agent string `json:"agent"`
-	Model string `json:"model"`
+	Task  *agents.Task `json:"task,omitempty"`
+	Name  string       `json:"name"`
+	Agent string       `json:"agent"`
+	Model string       `json:"model"`
 }
 
 // tryAgent runs a dry run of an agent (P10.4, « Essayer »): explicit, since
@@ -174,8 +178,47 @@ func (s *Server) tryAgent(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	res := agentrun.Try(r.Context(), agentrun.Spec{Agent: req.Agent, Model: req.Model, Dir: projectRoot(p), Name: req.Name,
-		Prompt: agentrun.TryPrompt(p != nil, requires), MCP: mcp})
+	spec := agentrun.Spec{Agent: req.Agent, Model: req.Model, Dir: projectRoot(p), Name: req.Name,
+		Prompt: agentrun.TryPrompt(p != nil, requires), MCP: mcp}
+	if req.Task != nil {
+		if err := agents.CheckTasks([]agents.Task{*req.Task}, false); err != nil {
+			jsonError(w, 400, "task", err.Error())
+			return
+		}
+		cfg, err := agents.Load()
+		if err != nil {
+			jsonError(w, 409, "config", err.Error())
+			return
+		}
+		access := agents.MergeAccess(cfg.Access, req.Task.Access)
+		access.MCP = agents.MergeAccess(access, agents.Access{MCP: mcp}).MCP
+		for i, d := range access.Dirs {
+			if !filepath.IsAbs(d) {
+				access.Dirs[i] = filepath.Join(spec.Dir, d)
+			}
+		}
+		spec.Root = spec.Dir
+		if req.Task.Workdir != "" {
+			dir := req.Task.Workdir
+			if !filepath.IsAbs(dir) {
+				dir = filepath.Join(spec.Root, dir)
+			}
+			resolved, err := filepath.EvalSymlinks(dir)
+			if err != nil {
+				jsonError(w, 400, "task", "dossier de lancement introuvable")
+				return
+			}
+			fi, err := os.Stat(resolved)
+			if err != nil || !fi.IsDir() {
+				jsonError(w, 400, "task", "dossier de lancement introuvable")
+				return
+			}
+			spec.Dir = resolved
+		}
+		spec.Access = &access
+		spec.Prompt += "\nConsigne à vérifier sans l'exécuter : " + req.Task.Name + "\n" + req.Task.Prompt
+	}
+	res := agentrun.Try(r.Context(), spec)
 	writeJSON(w, http.StatusOK, res)
 }
 
@@ -191,10 +234,12 @@ func (s *Server) setPage(w http.ResponseWriter, r *http.Request) {
 
 // agentsResponse is the state of the settings of the agents.
 type agentsResponse struct {
-	Config     agents.Config    `json:"config"`
-	Hash       string           `json:"hash"` // of agents.json, sent back to save
-	Configured bool             `json:"configured"`
-	Detection  agents.Detection `json:"detection"`
+	AccessWarnings map[string][]string `json:"accessWarnings"`
+	TaskIcons      []string            `json:"taskIcons"`
+	Config         agents.Config       `json:"config"`
+	Hash           string              `json:"hash"` // of agents.json, sent back to save
+	Configured     bool                `json:"configured"`
+	Detection      agents.Detection    `json:"detection"`
 	// Project: the text served, and what its glose.json asks (empty on
 	// the settings server).
 	Project *projectAgent `json:"project"`
@@ -214,6 +259,11 @@ func (s *Server) agentsState(ctx context.Context, d *agents.Detection) agentsRes
 		out.Error = err.Error()
 	} else {
 		out.Config, out.Hash, out.Configured = c, h, c.Configured()
+	}
+	out.TaskIcons = agents.TaskIcons
+	out.AccessWarnings = map[string][]string{}
+	for _, k := range agents.Kinds {
+		out.AccessWarnings[k.ID] = agentrun.AccessWarnings(k.ID, out.Config.Access)
 	}
 	if d != nil {
 		out.Detection = *d
@@ -373,6 +423,7 @@ loop:
 // agentInfo is what the interface needs to know of the agents with each
 // poll: configured or not, the agent of the text, the run in progress.
 type agentInfo struct {
+	Tasks []agents.Task `json:"tasks"`
 	// Passes of a turn with several recipients (P10.6), or null.
 	Passes *navette.Passes `json:"passes"`
 	// Link is the code of « Lier un agent » in progress, and the session
@@ -396,6 +447,7 @@ func (s *Server) agentInfoOf(c current, turn int) agentInfo {
 	ai.Owner = navette.ReadOwner(c.P.State(), turn)
 	ai.Aliases = []string{}
 	if cfg, err := agents.Load(); err == nil {
+		ai.Tasks = agents.MergeTasks(cfg.Tasks, c.P.Tasks)
 		ai.AgentsConfigured = cfg.Configured()
 		ai.Aliases = cfg.Names()
 		if ai.Aliases == nil {
@@ -538,6 +590,12 @@ func (s *Server) launch(c current) (agentrun.Status, error) {
 		return agentrun.Status{}, err
 	}
 	a, ok := textAgent(cfg, c.P)
+	if h, e := c.N.History(); e == nil {
+		if l := h.Last(); l != nil && l.Actor == review.Author && l.TurnEv.Task != nil {
+			a = l.TurnEv.Task.Agent
+			ok = true
+		}
+	}
 	if !ok {
 		return agentrun.Status{}, errors.New("aucun agent configuré (glose set)")
 	}
@@ -567,11 +625,21 @@ func (s *Server) launchAlias(c current, cfg agents.Config, a agents.Alias) (agen
 			mcp = append(mcp, name)
 		}
 	}
-	return s.runner.Start(agentrun.Launch{
-		Spec: agentrun.Spec{Agent: a.Agent, Model: a.Model, Dir: c.P.Root, Name: a.Name, MCP: mcp,
-			Prompt: agentrun.TurnPrompt(a.Name, c.P.Root, c.P.Agent.Instructions, c.P.Agent.Requires)},
-		State: c.P.State(), Turn: h.Turn(), Max: cfg.Max(),
-	})
+	spec := agentrun.Spec{Agent: a.Agent, Model: a.Model, Dir: c.P.Root, Name: a.Name, MCP: mcp, Prompt: agentrun.TurnPrompt(a.Name, c.P.Root, c.P.Agent.Instructions, c.P.Agent.Requires)}
+	max := cfg.Max()
+	if l := h.Last(); l != nil && l.Actor == review.Author && l.TurnEv.Task != nil {
+		t := l.TurnEv.Task
+		if t.Agent.Name != a.Name {
+			return agentrun.Status{}, fmt.Errorf("ce tour est réservé à %s", t.Agent.Name)
+		}
+		spec.Root = c.P.Root
+		spec.Dir = t.Workdir
+		spec.Access = &t.Access
+		spec.MCP = t.Access.MCP
+		spec.Prompt = agentrun.TaskPrompt(spec.Prompt, c.P.Root, *t)
+		max = time.Duration(t.MaxMinutes) * time.Minute
+	}
+	return s.runner.Start(agentrun.Launch{Spec: spec, State: c.P.State(), Turn: h.Turn(), Max: max})
 }
 
 // agentRun gives the run of the agent launched by Glose.

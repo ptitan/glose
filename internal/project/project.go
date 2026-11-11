@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/ptitan/glose/internal/agents"
 	"os"
 	"path"
 	"path/filepath"
@@ -35,13 +36,14 @@ const ProgressRead = "relue"
 
 // Profile is the content of glose.json. Every field is optional.
 type Profile struct {
-	Title     string   `json:"title"`
-	Files     []string `json:"files"`
-	Filter    string   `json:"filter"`
-	CSS       string   `json:"css"`
-	Resources []string `json:"resources"`
-	Pandoc    string   `json:"pandoc"`
-	Exclude   []string `json:"exclude"`
+	Tasks     []agents.Task `json:"tasks"`
+	Title     string        `json:"title"`
+	Files     []string      `json:"files"`
+	Filter    string        `json:"filter"`
+	CSS       string        `json:"css"`
+	Resources []string      `json:"resources"`
+	Pandoc    string        `json:"pandoc"`
+	Exclude   []string      `json:"exclude"`
 	// FilterPerFile declares that the filter treats each file on its own
 	// (no numbering across files): the HTML is then made and kept file by
 	// file (P6.5). Without a filter, it always is.
@@ -89,6 +91,7 @@ func (a *AgentProfile) check() error {
 
 // Project is a reviewed project, with every path checked and resolved.
 type Project struct {
+	Tasks     []agents.Task
 	Root      string       // absolute path of the project directory
 	Source    string       // absolute path given to Load: the directory, or a single file
 	Title     string       // title shown in the interface
@@ -207,6 +210,9 @@ func CheckProfile(raw []byte) error {
 	if err != nil {
 		return err
 	}
+	if err := agents.CheckTasks(prof.Tasks, true); err != nil {
+		return err
+	}
 	if prof.Agent != nil {
 		return prof.Agent.check()
 	}
@@ -257,6 +263,10 @@ func load(root, single string) (*Project, error) {
 		}
 		p.Agent = *prof.Agent
 	}
+	if err := agents.CheckTasks(prof.Tasks, true); err != nil {
+		return nil, err
+	}
+	p.Tasks = prof.Tasks
 	p.Meta, p.MetaWarnings = parseMeta(prof.Project)
 	if prof.Pandoc != "" {
 		p.Pandoc = prof.Pandoc

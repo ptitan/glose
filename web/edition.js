@@ -122,6 +122,9 @@ window.GloseEdition = (() => {
     $("menu-selection").hidden = true;
     agents.preparerDestinataire("edition");
     $("edition-pour-ligne").hidden = $("edition-pour-ligne").hidden || contexte.mode === "revise";
+    // D-57: a direct change, never on a proposal being corrected.
+    $("edition-direct").hidden = contexte.mode === "revise";
+    majDirect();
     panneauEdition.ouvrir();
     if (prefere !== "mef" || !modeEdition("mef", true)) modeEdition("source", true);
     $("edition-changements").textContent = "";
@@ -383,9 +386,24 @@ window.GloseEdition = (() => {
     if (await majChangements(true)) modeEdition("apercu");
   }
 
-  async function enregistrerEdition() {
+  // A message for the agent asks for an answer: it goes with a suggestion,
+  // not with a direct change (D-57).
+  function majDirect() {
+    const b = $("edition-direct");
+    b.disabled = !!$("edition-note").value.trim();
+    b.dataset.infobulle = b.disabled
+      ? "Un message pour l'agent appelle une réponse : retirez-le pour appliquer directement, ou ajoutez la suggestion"
+      : "Modifier le texte tout de suite, sans proposition : l'agent ne la discute pas (Ctrl+Maj+Entrée)";
+  }
+
+  async function enregistrerEdition(direct) {
     const x = S.edition;
     if (!x || S.envoi) return;
+    direct = direct === true && x.mode !== "revise";
+    if (direct && $("edition-note").value.trim()) {
+      $("edition-message").textContent = "Une modification directe ne s'adresse pas à l'agent : retirez le message, ou ajoutez la suggestion.";
+      return;
+    }
     if (x.envoiIncertain) { $("edition-message").textContent = "Un enregistrement a été tenté : vérifiez le texte avant de recommencer. Votre saisie reste dans Brouillons."; return; }
     const texte = texteEdition();
     if (texte === x.original) { $("edition-message").textContent = "Aucune modification."; return; }
@@ -396,9 +414,11 @@ window.GloseEdition = (() => {
       ? { file: x.file, hash: x.hash, start: x.annotation, text: texte, note: $("edition-note").value.trim() }
       : { file: x.file, hash: x.hash, mode: x.mode, at: x.at, to: x.to || 0, where: x.where || "", tight: !!x.tight,
         start: x.start, end: x.end, text: texte, note: dest.texte.trim(), whole: $("edition-tenant").checked, recipient: dest.pour };
+    if (direct) Object.assign(req, { note: "", recipient: "", whole: false, direct: true });
     S.envoi = true;
     S.occupe++;
     $("edition-ok").disabled = true;
+    $("edition-direct").disabled = true;
     $("edition").querySelector(".corps").inert = true;
     const pret = await preparerBrouillon("edition");
     const r = pret ? await api(correction ? "/api/revise" : "/api/edit", req)
@@ -406,16 +426,18 @@ window.GloseEdition = (() => {
     await apresEnvoiBrouillon(x, r);
     $("edition").querySelector(".corps").inert = false;
     $("edition-ok").disabled = false;
+    majDirect();
     S.envoi = false;
     try {
       if (r.ok) {
         S.annuler.push(correction
           ? { type: "correction", file: req.file, start: r.data.start, hashApres: r.data.hash, avant: x.original, apres: texte }
+          : direct ? { type: "directe", file: req.file, hashApres: r.data.hash, req }
           : { type: "edition", file: req.file, start: r.data.start, end: r.data.end, hashApres: r.data.hash, req });
         S.retablir = [];
         S.edition = null;
         $("edition").close();
-        avis(correction ? "Proposition modifiée." + (req.note ? " Votre message est dans son fil." : "")
+        avis(direct ? "Texte modifié directement (Ctrl+Z pour annuler)." : correction ? "Proposition modifiée." + (req.note ? " Votre message est dans son fil." : "")
           : req.note ? "Proposition enregistrée, avec votre message." : "Modifications enregistrées comme propositions.");
         await charger(true);
         return;
@@ -446,6 +468,7 @@ window.GloseEdition = (() => {
     };
     $("edition-fermer").addEventListener("click", fermerEdition);
     $("edition-annuler").addEventListener("click", fermerEdition);
+    $("edition-direct").addEventListener("click", () => enregistrerEdition(true));
     $("edition").addEventListener("cancel", (e) => { e.preventDefault(); fermerEdition(); });
     // Editor links do not open: clicking would leave Glose.
     $("edition-visuel").addEventListener("click", (e) => { if (e.target.closest("a")) e.preventDefault(); });
@@ -467,7 +490,7 @@ window.GloseEdition = (() => {
     const zv = $("edition-visuel");
     zv.addEventListener("keydown", (e) => {
       if (compose(e)) return;
-      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); if (!e.repeat) enregistrerEdition(); return; }
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); if (!e.repeat) enregistrerEdition(e.shiftKey); return; }
       if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); document.execCommand("insertParagraph"); }
       if (e.key === "Enter" && e.shiftKey) e.preventDefault();
     });
@@ -484,7 +507,7 @@ window.GloseEdition = (() => {
     for (const id of ["edition-texte", "edition-note"]) {
       $(id).addEventListener("keydown", (e) => {
         if (compose(e)) return;
-        if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); if (!e.repeat) enregistrerEdition(); }
+        if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) { e.preventDefault(); if (!e.repeat) enregistrerEdition(e.shiftKey); }
       });
     }
   }
@@ -494,7 +517,7 @@ window.GloseEdition = (() => {
   }
 
   function brancherNote() {
-    $("edition-note").addEventListener("input", () => garderBrouillon("edition"));
+    $("edition-note").addEventListener("input", () => { garderBrouillon("edition"); majDirect(); });
   }
 
     return { modifierBloc, ajouter, ouvrirEdition, texteEdition, brancher, brancherTypes, brancherNote };

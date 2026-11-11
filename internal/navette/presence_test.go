@@ -178,3 +178,31 @@ func TestLaunchedPresenceIsKept(t *testing.T) {
 		}
 	}
 }
+
+func TestProgressDoesNotCrossAgentsOrTurns(t *testing.T) {
+	dir := t.TempDir()
+	if err := Progress(dir, "Sol", 2, "Lecture du texte."); err != nil {
+		t.Fatal(err)
+	}
+	if err := Touch(dir, "Sol", ActRead, 2); err != nil {
+		t.Fatal(err)
+	}
+	if ReadPresence(dir).Progress != "Lecture du texte." {
+		t.Fatal("phrase perdue")
+	}
+	if err := Touch(dir, "Sol", ActRead, 4); err != nil {
+		t.Fatal(err)
+	}
+	if ReadPresence(dir).Progress != "" {
+		t.Fatal("ancien tour")
+	}
+	if err := Progress(dir, "Sol", 4, "Révision."); err != nil {
+		t.Fatal(err)
+	}
+	if err := Touch(dir, "Autre", ActRead, 4); err != nil {
+		t.Fatal(err)
+	}
+	if ReadPresence(dir).Progress != "" {
+		t.Fatal("autre agent")
+	}
+}

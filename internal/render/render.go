@@ -75,6 +75,7 @@ type Annotation struct {
 	// the default agent. Via: the agent that wrote a proposal (D-49).
 	To    string `json:"to,omitempty"`
 	Via   string `json:"via,omitempty"`
+	Task  string `json:"task,omitempty"`
 	Model string `json:"model,omitempty"` // model= : the model of that agent (P10.11)
 }
 
@@ -84,11 +85,12 @@ type Message struct {
 	ID    string `json:"id"`
 	By    string `json:"by"`
 	Text  string `json:"text"`
-	Start int    `json:"start"`           // byte offset of the message (to undo a reply)
-	Reply bool   `json:"reply"`           // false for the head of the annotation
-	Fix   bool   `json:"fix,omitempty"`   // a correction of the proposal (review.Meta.Fix)
-	To    string `json:"to,omitempty"`    // to= : the agent that must answer (D-49)
-	Via   string `json:"via,omitempty"`   // via= : the agent that wrote it (D-49)
+	Start int    `json:"start"`         // byte offset of the message (to undo a reply)
+	Reply bool   `json:"reply"`         // false for the head of the annotation
+	Fix   bool   `json:"fix,omitempty"` // a correction of the proposal (review.Meta.Fix)
+	To    string `json:"to,omitempty"`  // to= : the agent that must answer (D-49)
+	Via   string `json:"via,omitempty"` // via= : the agent that wrote it (D-49)
+	Task  string `json:"task,omitempty"`
 	Model string `json:"model,omitempty"` // model= : its model (P10.11)
 	// Status is new or open, like that of an annotation (package navette):
 	// a message not handed over yet may still be amended by its author.
@@ -668,7 +670,7 @@ func annotations(file int, src []byte) []Annotation {
 		a := Annotation{File: file, ID: ra.ID, By: ra.By, Start: ra.Span.Start, End: ra.Span.End, Kind: KindName(m.Kind),
 			TextStart: m.Text.Start, TextEnd: m.Text.End, Text: string(src[m.Text.Start:m.Text.End]),
 			NewStart: m.New.Start, NewEnd: m.New.End,
-			New: string(src[m.New.Start:m.New.End]), Comments: []string{}, Messages: []Message{}, To: ra.Recipient(), Via: ra.Via, Model: ra.Model}
+			New: string(src[m.New.Start:m.New.End]), Comments: []string{}, Messages: []Message{}, To: ra.Recipient(), Via: ra.Via, Model: ra.Model, Task: ra.Task}
 		head := len(ra.Messages) - len(ra.Replies())
 		for k, msg := range ra.Messages {
 			text := string(src[msg.Mark.Text.Start:msg.Mark.Text.End])
@@ -676,7 +678,7 @@ func annotations(file int, src []byte) []Annotation {
 				a.Comments = append(a.Comments, text)
 			}
 			a.Messages = append(a.Messages, Message{ID: msg.ID, By: msg.By, Text: text, Start: msg.Span.Start, Reply: k >= head, Fix: msg.Fix,
-				To: msg.To, Via: msg.Via, Model: msg.Model})
+				To: msg.To, Via: msg.Via, Model: msg.Model, Task: msg.Task})
 		}
 		if l, ok := links[ra.Span.Start]; ok {
 			a.Partners, a.Primary, a.Note = l.Partners, l.Primary, l.Note

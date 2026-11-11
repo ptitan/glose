@@ -68,7 +68,11 @@ test("compter et rayon : un geste par suggestion, décisions par marque", () => 
     { kind: "resolve", closed: [{ decision: "resolve" }] },
   ];
   const n = D.compter(ops);
-  assert.deepEqual(n, { discussion: 2, propositions: 2, acceptees: 2, rejetees: 1, resolues: 1, total: 8 });
+  assert.deepEqual(n, { discussion: 2, propositions: 2, acceptees: 2, rejetees: 1, resolues: 1, directes: 0, total: 8 });
+  // D-57 : une modification directe est un geste, quel que soit le nombre de ses mots.
+  assert.deepEqual(D.compter([{ kind: "direct", closed: [{ decision: "direct" }, { decision: "direct" }] }]),
+    { discussion: 0, propositions: 0, acceptees: 0, rejetees: 0, resolues: 0, directes: 1, total: 1 });
+  assert.equal(D.bilan([{ kind: "direct", closed: [{ decision: "direct" }] }, { kind: "direct", closed: [{ decision: "direct" }] }]), "2 modifications directes");
   assert.equal(D.rayon({ total: 0 }), 11);
   assert.equal(D.rayon({ total: 1000 }), 18);
 });
@@ -229,6 +233,9 @@ test("decisionsDuJournal : du plus récent au plus ancien, révisions et inconnu
   // Annulée : l'annotation est de nouveau dans le texte. Décidée deux fois : la dernière.
   const tours = [{ round: 1, operations: [{ closed: [close("a", "accept")] }, { closed: [close("b", "reject")] }, { closed: [close("b", "accept")] }] }];
   assert.deepEqual(D.decisionsDuJournal(tours, new Set(["a"])).map((x) => [x.c.id, x.etat.libelle]), [["b", "Accepté"]]);
+  // D-57 : une modification directe est « Imposé » ; annulée, elle sort de la liste.
+  const directes = [{ round: 1, operations: [{ kind: "direct", closed: [close("x", "direct"), close("y", "direct")] }, { kind: "undo", reverted: ["x"] }] }];
+  assert.deepEqual(D.decisionsDuJournal(directes).map((x) => [x.c.id, x.etat.libelle]), [["y", "Imposé"]]);
 });
 
 test("thèmes : chacun complet, et lisible pour un texte long", () => {

@@ -26,10 +26,12 @@ import (
 
 // Spec is what to launch.
 type Spec struct {
-	Agent string // claude, codex, opencode
-	Model string // empty: the agent's own default
-	Dir   string // directory of the project: the agent works there
-	Name  string // name given to glose (GLOSE_AGENT): the short name
+	Root   string         // project root, when workdir differs
+	Access *agents.Access // nil preserves the P10 handover
+	Agent  string         // claude, codex, opencode
+	Model  string         // empty: the agent's own default
+	Dir    string         // directory of the project: the agent works there
+	Name   string         // name given to glose (GLOSE_AGENT): the short name
 	// Prompt is the instruction of the run.
 	Prompt string
 	// DryRun: the agent may read and run « glose status » or « glose
@@ -141,6 +143,10 @@ func Command(ctx context.Context, s Spec) (*exec.Cmd, error) {
 			args = append(args, "-m", s.Model)
 		}
 		args = append(args, s.Prompt)
+	}
+	args, env, err = applyAccess(s, args, env)
+	if err != nil {
+		return nil, err
 	}
 	cmd := exec.CommandContext(ctx, path, args...)
 	cmd.Dir = s.Dir

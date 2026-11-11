@@ -285,3 +285,14 @@ func TestCodeScanIsLinear(t *testing.T) {
 		}
 	}
 }
+
+func TestTaskRemainsAnOrdinaryTechnicalComment(t *testing.T) {
+	src := []byte("\ufeff{++Texte++}{>>glose:v1 id=abcd by=agent via=Sol task=rewrite<<}\r\n")
+	marks, issues := Parse(src)
+	if len(issues) != 0 || len(marks) != 2 || marks[1].Kind != Comment || !bytes.Contains(src[marks[1].Text.Start:marks[1].Text.End], []byte("task=rewrite")) {
+		t.Fatal(marks, issues)
+	}
+	if len(Group(marks)) != 1 {
+		t.Fatal("le commentaire de mission a quitté sa proposition")
+	}
+}

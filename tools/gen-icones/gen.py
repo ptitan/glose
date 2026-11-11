@@ -37,8 +37,10 @@ ICONES = {
     "configurer": "settings", "essayer": "play", "rafraichir": "refresh-cw",
     "accueil": "house", "calendrier": "calendar", "activite": "activity", "points": "ellipsis",
     "fleche": "arrow-right", "retour": "arrow-left", "horloge": "clock", "debranche": "unplug",
-    "introuvable": "folder-x", "archive": "archive", "tri": "arrow-up-down", "clair": "sun", "sombre": "moon",
+    "info": "info", "introuvable": "folder-x", "archive": "archive", "tri": "arrow-up-down", "clair": "sun", "sombre": "moon",
 }
+
+ICONES.update({nom: nom for nom in ['pen-line', 'pencil', 'pen-tool', 'wand-sparkles', 'spell-check', 'languages', 'scale', 'book-check', 'file-pen', 'list-checks', 'search-check', 'sparkles']})
 
 # Éléments colorés : (icône, tracé exact) -> classe.
 COULEURS = {

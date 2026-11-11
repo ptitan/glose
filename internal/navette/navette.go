@@ -269,17 +269,18 @@ func Disappeared(f *Files, h *History) []string {
 // State is the state of the exchange, for « glose status » and the banner of
 // the interface (SPEC F14).
 type State struct {
-	Turn        int            `json:"turn"`  // part in progress, from 1 (journal numbering: one per handover)
-	Round       int            `json:"round"` // round shown to the author: her part and the agent's answer (Round)
-	Part        string         `json:"part"`  // author or agent: whose part of the round is in progress
-	Hand        string         `json:"hand"`  // author or agent
-	Since       string         `json:"since,omitempty"`
-	LastActor   string         `json:"lastActor,omitempty"`
-	Note        string         `json:"note,omitempty"`
-	Reclaimed   bool           `json:"reclaimed,omitempty"`
-	Annotations int            `json:"annotations"`
-	Kinds       map[string]int `json:"kinds"`
-	Statuses    map[string]int `json:"statuses"`
+	Task        *journal.TaskInfo `json:"task,omitempty"`
+	Turn        int               `json:"turn"`  // part in progress, from 1 (journal numbering: one per handover)
+	Round       int               `json:"round"` // round shown to the author: her part and the agent's answer (Round)
+	Part        string            `json:"part"`  // author or agent: whose part of the round is in progress
+	Hand        string            `json:"hand"`  // author or agent
+	Since       string            `json:"since,omitempty"`
+	LastActor   string            `json:"lastActor,omitempty"`
+	Note        string            `json:"note,omitempty"`
+	Reclaimed   bool              `json:"reclaimed,omitempty"`
+	Annotations int               `json:"annotations"`
+	Kinds       map[string]int    `json:"kinds"`
+	Statuses    map[string]int    `json:"statuses"`
 	// ThisTurn counts what the party who has the hand wrote during this
 	// turn, not handed over yet: "comments", "proposals", "replies" (the
 	// handover button shows it, P9.3).
@@ -289,6 +290,9 @@ type State struct {
 	// Agent is the presence of the agent (P10.1), or null if no agent ever
 	// gave a sign; not normative (.glose/agent.json).
 	Agent *AgentState `json:"agent"`
+	// Imposed lists the direct changes of the author's last part (D-57):
+	// written in the text, never to be discussed by the agent.
+	Imposed []journal.Closed `json:"imposed"`
 }
 
 // Round gives the round of a turn as the author counts them: she annotates,
@@ -308,7 +312,11 @@ func (n *Navette) State() (State, *History, *Files, error) {
 	if l := h.Last(); l != nil {
 		st.Since, st.LastActor, st.Note, st.Reclaimed = l.Time, l.Actor, l.TurnEv.Note, l.TurnEv.Reclaimed
 	}
+	if l := h.Last(); l != nil && l.Actor == review.Author && st.Hand == review.Agent {
+		st.Task = l.TurnEv.Task
+	}
 	st.Agent = n.Agent(st.Hand, st.Since)
+	st.Imposed = h.Imposed()
 	var all []render.Annotation
 	for i := range n.P.Files {
 		if f.Errs[i] != nil {
@@ -410,10 +418,16 @@ type Change struct {
 // contents before and after. decision names what the closing of an
 // annotation means (accept, reject, resolve, withdraw).
 func (n *Navette) Commit(actor, kind, decision, note string, changes []Change) error {
+	return n.commit(actor, &Spec{Kind: kind, Decision: decision}, note, changes)
+}
+
+// commit is Commit, for the operation that spec describes.
+func (n *Navette) commit(actor string, spec *Spec, note string, changes []Change) error {
 	if err := n.prepare(); err != nil {
 		return err
 	}
-	op := journal.Op{Kind: kind, Note: note}
+	kind, decision := spec.Kind, spec.Decision
+	op := journal.Op{Kind: kind, Note: note, Reverted: spec.Reverted}
 	var jc []journal.Change
 	for _, c := range changes {
 		path := n.P.Files[c.File]
@@ -428,6 +442,7 @@ func (n *Navette) Commit(actor, kind, decision, note string, changes []Change) e
 		op.Revised = append(op.Revised, Revisions(path, c.Before, c.After)...)
 		jc = append(jc, journal.Change{Path: path, Abs: n.P.Path(c.File), Before: c.Before, After: c.After})
 	}
+	op.Closed = append(op.Closed, spec.Direct...)
 	_, err := n.J.Commit(actor, op, jc)
 	return err
 }
@@ -582,10 +597,10 @@ func sameAnnotationIn(src []byte, ann review.Annotation, a *review.Doc) bool {
 
 func copyOf(path string, src []byte, a review.Annotation, decision string) journal.Closed {
 	m := a.Mark
-	c := journal.Closed{ID: a.ID, File: path, Decision: decision, Kind: render.KindName(m.Kind), By: a.By,
+	c := journal.Closed{ID: a.ID, File: path, Decision: decision, Kind: render.KindName(m.Kind), By: a.By, Task: a.Task,
 		Text: string(src[m.Text.Start:m.Text.End]), New: string(src[m.New.Start:m.New.End])}
 	for _, msg := range a.Messages {
-		c.Messages = append(c.Messages, journal.Message{ID: msg.ID, By: msg.By, Text: string(src[msg.Mark.Text.Start:msg.Mark.Text.End])})
+		c.Messages = append(c.Messages, journal.Message{ID: msg.ID, By: msg.By, Task: msg.Task, Text: string(src[msg.Mark.Text.Start:msg.Mark.Text.End])})
 	}
 	return c
 }
@@ -604,4 +619,14 @@ const (
 // isProposal reports whether a kind is a proposal.
 func isProposal(k critic.Kind) bool {
 	return k == critic.Addition || k == critic.Deletion || k == critic.Substitution
+}
+
+// ActiveTask is fixed by the author’s handover, never by the process environment.
+func (h *History) ActiveTask() string {
+	if h.Hand() == review.Agent {
+		if l := h.Last(); l != nil && l.TurnEv.Task != nil {
+			return l.TurnEv.Task.ID
+		}
+	}
+	return ""
 }

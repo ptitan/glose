@@ -63,6 +63,9 @@ func stateLine(st navette.State) string {
 	}
 	// The note of the handover, in full on its own line: it may be the
 	// instruction of the round (navette d'essai du 7 novembre 2026).
+	if st.Task != nil {
+		fmt.Fprintf(&b, "\n%s mène « %s » · %s", st.Task.Agent.Name, st.Task.Name, strings.Join(st.Task.Files, ", "))
+	}
 	if st.Note != "" {
 		fmt.Fprintf(&b, "\nNote de %s : %s", handNames[st.LastActor], st.Note)
 	}
@@ -134,6 +137,9 @@ func cmdStatus(args []string, stdout, stderr io.Writer) int {
 	}
 	for _, pb := range st.Problems {
 		fmt.Fprintf(stdout, "Attention : %s\n", pb)
+	}
+	if n := len(st.Imposed); n > 0 {
+		fmt.Fprintf(stdout, "Modifications imposées par l'auteur : %d, déjà dans le texte, à ne pas discuter (glose list)\n", n)
 	}
 	if a := st.Agent; a != nil {
 		fresh := "aucun signe depuis " + when(a.Seen)
@@ -318,7 +324,19 @@ func cmdWait(args []string, stdout, stderr io.Writer) int {
 	}
 }
 
-var decisionNames = map[string]string{navette.Accept: "accepté", navette.Reject: "rejeté", navette.Resolve: "résolu", navette.Withdraw: "retiré"}
+var decisionNames = map[string]string{navette.Accept: "accepté", navette.Reject: "rejeté", navette.Resolve: "résolu", navette.Withdraw: "retiré",
+	navette.Direct: "imposé"}
+
+// imposedText describes a direct change of the author (D-57).
+func imposedText(c journal.Closed) string {
+	switch c.Kind {
+	case "substitution":
+		return fmt.Sprintf("« %s » → « %s »", oneLine(c.Text, 60), oneLine(c.New, 60))
+	case "deletion":
+		return "supprimé : « " + oneLine(c.Text, 80) + " »"
+	}
+	return "ajouté : « " + oneLine(c.Text, 80) + " »"
+}
 
 func cmdLog(args []string, stdout, stderr io.Writer) int {
 	var asJSON bool
@@ -371,6 +389,9 @@ func cmdLog(args []string, stdout, stderr io.Writer) int {
 				line = partNames["agent"] + ", main reprise par l'auteur le "
 			}
 			fmt.Fprintf(stdout, "Tour %d — %s%s", navette.Round(t.Number), line, when(t.Time))
+			if t.Task != nil {
+				fmt.Fprintf(stdout, " · %s mène « %s »", t.Task.Agent.Name, t.Task.Name)
+			}
 			if t.Note != "" {
 				fmt.Fprintf(stdout, " : « %s »", oneLine(t.Note, 100))
 			}
@@ -408,6 +429,9 @@ func cmdLog(args []string, stdout, stderr io.Writer) int {
 				}
 				fmt.Fprintf(stdout, "      %s %s, version précédente (%s) : %s\n", c.ID, done, names[c.Kind], what)
 			}
+			for _, id := range o.Reverted {
+				fmt.Fprintf(stdout, "      %s : modification directe annulée\n", id)
+			}
 		}
 	}
 	for _, pb := range h.Problems {
@@ -422,7 +446,8 @@ var partNames = map[string]string{"author": "annotations de l'auteur", "agent": 
 
 var opNames = map[string]string{"comment": "commentaire", "reply": "réponse", "propose": "proposition", "decide": "décision",
 	"resolve": "fil résolu", "withdraw": "retrait", "identify": "identifiants ajoutés", "track": "modifications converties en propositions",
-	"revise": "proposition corrigée", "amend": "message modifié", "undo": "décision annulée"}
+	"revise": "proposition corrigée", "amend": "message modifié", "undo": "décision annulée",
+	"direct": "modification directe de l'auteur"}
 
 var names = map[string]string{"comment": "commentaire", "highlight": "passage commenté", "addition": "ajout",
 	"deletion": "suppression", "substitution": "remplacement", "message": "message"}

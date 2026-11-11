@@ -129,6 +129,7 @@ class Page {
   send(method, params) { return this.bidi.send(method, params); }
   // Same contract as cdp.cjs: fn runs in the page with JSON arguments, and
   // its (awaited) result comes back through JSON.
+  async viewport(width, height) { return this.send('browsingContext.setViewport', {context: this.context, viewport: {width, height}, devicePixelRatio: 1}); }
   async evaluate(fn, ...args) {
     const result = await this.send('script.evaluate', {
       expression: `(async () => JSON.stringify(await (${fn.toString()})(...${JSON.stringify(args)})))()`,
@@ -138,7 +139,7 @@ class Page {
     return result.result.type === 'string' ? JSON.parse(result.result.value) : undefined;
   }
   async wait(description, fn, ...args) { return until(description, () => this.evaluate(fn, ...args)); }
-  async navigate(url) {
+  async navigate(url, selector) {
     const marker = String(Date.now()) + ':' + Math.random();
     await this.evaluate((marker) => { window.__gloseOldDocument = marker; }, marker);
     // A disposable query forces a real document load (see cdp.cjs), and the
@@ -149,7 +150,37 @@ class Page {
       await this.send('browsingContext.navigate', { context: this.context, url: destination.href, wait: 'complete' });
       return true;
     });
-    await this.wait('chargement d’un nouveau document Glose', (marker) => window.__gloseOldDocument !== marker && document.querySelector('#texte')?.getAttribute('aria-busy') === 'false' && !!document.querySelector('#texte span[data-g]'), marker);
+    // Same contract as cdp.cjs: a page other than the text (glose set) names
+    // the element that proves it is loaded.
+    if (selector) await this.wait('chargement de ' + selector, (marker, selector) => window.__gloseOldDocument !== marker && document.readyState === 'complete' && !!document.querySelector(selector), marker, selector);
+    else await this.wait('chargement d’un nouveau document Glose', (marker) => window.__gloseOldDocument !== marker && document.querySelector('#texte')?.getAttribute('aria-busy') === 'false' && !!document.querySelector('#texte span[data-g]'), marker);
+  }
+  // Shared scenarios (tasks.cjs) use click and fill, as on Chromium. Same
+  // checks as cdp.cjs (present, enabled, visible, not covered), then a DOM
+  // click: BiDi pointer actions are not needed for these forms.
+  async click(selector) {
+    await this.evaluate(async (selector) => {
+      const element = document.querySelector(selector);
+      if (!element || element.disabled) throw new Error('Bouton absent ou désactivé : ' + selector);
+      element.scrollIntoView({ block: 'center', behavior: 'instant' });
+      await new Promise(requestAnimationFrame);
+      await new Promise(requestAnimationFrame);
+      const r = element.getBoundingClientRect();
+      if (!r.width || !r.height) throw new Error('Élément masqué : ' + selector);
+      const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+      if (!hit || !element.contains(hit)) throw new Error('Élément recouvert : ' + selector);
+      element.click();
+    }, selector);
+  }
+  async fill(selector, text) {
+    await this.evaluate((selector, text) => {
+      const element = document.querySelector(selector);
+      if (!element) throw new Error('Champ absent : ' + selector);
+      element.focus();
+      element.value = text;
+      element.dispatchEvent(new Event('input', { bubbles: true }));
+      element.dispatchEvent(new Event('change', { bubbles: true }));
+    }, selector, text);
   }
   async close() {
     this.bidi.listeners = this.bidi.listeners.filter((l) => l !== this.listener);

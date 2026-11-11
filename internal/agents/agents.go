@@ -235,6 +235,8 @@ type Alias struct {
 
 // Config is the general configuration of the agents (agents.json).
 type Config struct {
+	Tasks   []Task  `json:"tasks,omitempty"`
+	Access  Access  `json:"access,omitempty"`
 	Version int     `json:"version"`
 	Default string  `json:"default"` // name of the default alias
 	Aliases []Alias `json:"aliases"`
@@ -299,6 +301,12 @@ func CheckModel(m string) error {
 // default chosen if there is one alias at least.
 func (c Config) Check() (Config, error) {
 	c.Version = 1
+	if err := CheckTasks(c.Tasks, false); err != nil {
+		return c, err
+	}
+	if err := c.Access.Check(false); err != nil {
+		return c, err
+	}
 	seen := map[string]bool{}
 	for _, a := range c.Aliases {
 		if err := CheckAlias(a.Name); err != nil {

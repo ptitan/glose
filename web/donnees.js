@@ -58,17 +58,20 @@
     ["acceptees", "acceptées"],
     ["rejetees", "rejetées"],
     ["resolues", "discussions résolues"],
+    ["directes", "modifications directes"],
   ];
 
   function compter(ops) {
-    const n = { discussion: 0, propositions: 0, acceptees: 0, rejetees: 0, resolues: 0 };
+    const n = { discussion: 0, propositions: 0, acceptees: 0, rejetees: 0, resolues: 0, directes: 0 };
     for (const o of ops) {
       if (o.kind === "comment" || o.kind === "reply") n.discussion++;
       // A suggestion, correction, or converted agent handoff:
       // one action each, regardless of the number of marks created.
       else if (o.kind === "propose" || o.kind === "revise" || o.kind === "track") n.propositions++;
+      // A direct change of the author (D-57): one action, whatever its words.
+      else if (o.kind === "direct") n.directes++;
       for (const c of o.closed || []) {
-        if (c.kind === "message") continue;
+        if (c.kind === "message" || c.decision === "direct") continue;
         if (c.decision === "accept") n.acceptees++;
         else if (c.decision === "reject") n.rejetees++;
         else if (c.decision === "resolve") n.resolues++;
@@ -90,12 +93,12 @@
     for (const o of ops) {
       if (o.kind === "track") n.converties = true;
       else if (o.kind !== "decide" && o.kind !== "resolve" && o.kind !== "identify") plus(o.kind);
-      for (const c of o.closed || []) if (c.kind !== "message") plus("d-" + c.decision);
+      for (const c of o.closed || []) if (c.kind !== "message" && c.decision !== "direct") plus("d-" + c.decision);
     }
     const mots = (k, un, plusieurs) => (n[k] ? n[k] + " " + (n[k] > 1 ? plusieurs : un) : "");
     const faits = [mots("comment", "commentaire", "commentaires"), mots("reply", "réponse", "réponses"),
       mots("propose", "suggestion", "suggestions"), n.converties ? "modifications du texte converties en propositions" : "",
-      mots("revise", "correction", "corrections"), mots("amend", "message modifié", "messages modifiés"), mots("withdraw", "retrait", "retraits"), mots("undo", "décision annulée", "décisions annulées")].filter(Boolean);
+      mots("direct", "modification directe", "modifications directes"), mots("revise", "correction", "corrections"), mots("amend", "message modifié", "messages modifiés"), mots("withdraw", "retrait", "retraits"), mots("undo", "décision annulée", "décisions annulées")].filter(Boolean);
     const decisions = [mots("d-accept", "acceptée", "acceptées"), mots("d-reject", "rejetée", "rejetées"), mots("d-resolve", "résolue", "résolues")].filter(Boolean);
     return [faits.join(", "), decisions.length ? "décisions : " + decisions.join(", ") : ""].filter(Boolean).join(" ; ");
   }
@@ -277,6 +280,7 @@
     reject: { libelle: "Rejeté", ton: "rejete", icone: "rejeter" },
     resolve: { libelle: "Résolu", ton: "neutre", icone: "resoudre" },
     withdraw: { libelle: "Retiré", ton: "neutre", icone: "retirer" },
+    direct: { libelle: "Imposé", ton: "auteur", icone: "corriger" },
   };
 
   // The annotations closed, most recent first, from what /api/log returns. The
@@ -284,10 +288,13 @@
   // in the text is not closed, and one decided twice counts by its last decision.
   function decisionsDuJournal(tours, ouvertes) {
     const liste = [];
+    // The direct changes undone since (D-57) no longer count.
+    const annulees = new Set();
+    for (const p of tours || []) for (const op of p.operations || []) for (const id of op.reverted || []) annulees.add(id);
     for (const p of tours || []) {
       for (const op of p.operations || []) {
         for (const c of op.closed || []) {
-          if (ETATS_DECISION[c.decision]) liste.push({ c, op, round: p.round, etat: ETATS_DECISION[c.decision] });
+          if (ETATS_DECISION[c.decision] && !(c.decision === "direct" && annulees.has(c.id))) liste.push({ c, op, round: p.round, etat: ETATS_DECISION[c.decision] });
         }
       }
     }

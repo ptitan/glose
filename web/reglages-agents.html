@@ -50,6 +50,13 @@
     <div id="ra-alias" class="ra-alias"></div>
   </section>
 
+  <section class="ra-section-consignes" aria-labelledby="ra-t-consignes">
+    <div class="ra-bloc-tete"><div><h2 id="ra-t-consignes">Consignes</h2><p class="aide">Une consigne prépare un travail précis. Les consignes du projet remplacent celles de même identifiant.</p></div><button type="button" id="ra-ajouter-consigne"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" data-icone="plus"></svg> Ajouter une consigne</button></div>
+    <div id="ra-consignes"></div>
+  </section>
+
+  <section class="ra-bloc" aria-labelledby="ra-t-acces"><h2 id="ra-t-acces">Accès par défaut des consignes</h2><p class="aide">Le socle commun à chaque lancement. Une consigne peut accorder des accès supplémentaires.</p><div id="ra-acces" class="ra-acces"></div><p id="ra-limites" class="aide"></p><p class="aide">Les accès effectifs et les limites propres à l’agent sont rappelés avant de lancer.</p></section>
+
   <section id="ra-projet" class="ra-bloc" aria-labelledby="ra-t-projet" hidden>
     <h2 id="ra-t-projet">Ce texte</h2>
     <p id="ra-projet-texte"></p>
@@ -71,7 +78,7 @@
 
   <footer class="ra-pied">
     <span id="ra-statut" role="status" aria-live="polite"></span>
-    <button type="button" id="ra-enregistrer" class="principal">Enregistrer</button>
+    <button type="button" id="ra-enregistrer" class="principal"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" data-icone="accepter"></svg> Enregistrer</button>
   </footer>
 </main>
 </body>

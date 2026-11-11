@@ -443,6 +443,13 @@ window.GloseColonne = (() => {
     resume.append(el("strong", "", tours + " tour" + (tours > 1 ? "s" : "")),
       el("span", "", tot.acceptees + " acceptée" + (tot.acceptees > 1 ? "s" : "") + " · " + tot.rejetees + " rejetée" + (tot.rejetees > 1 ? "s" : "") +
         " · " + tot.discussion + " message" + (tot.discussion > 1 ? "s" : "")));
+    // While the agent holds the hand, its progress sentence (D-59 § 7) shows at
+    // the top of the turns, whatever part is selected; navette.js refreshes it.
+    {
+      const a = S.doc.state.agent;
+      const texte = a && a.fresh && a.taken && a.progress ? a.progress + ' · ' + new Date(a.progressAt).toLocaleTimeString('fr-FR', {hour:'2-digit',minute:'2-digit'}) : '';
+      const progression = el('span', 'tour-avancement', texte); progression.hidden = !texte; resume.append(progression);
+    }
     const decidees = tot.acceptees + tot.rejetees + tot.resolues;
     if (decidees) {
       const barre = el("div", "barre");
@@ -582,6 +589,12 @@ window.GloseColonne = (() => {
     const q = el("span", "quand", ligne);
     if (p.time) q.dataset.infobulle = new Date(p.time).toLocaleString("fr-FR");
     d.append(q);
+    if (!p.actor && qui === 'agent') {
+      const a = S.doc.state.agent;
+      if (a && a.fresh && a.taken && a.progress) q.textContent = a.name + ' travaille';
+      const texte = a && a.fresh && a.taken && a.progress ? a.progress + ' · ' + new Date(a.progressAt).toLocaleTimeString('fr-FR', {hour:'2-digit',minute:'2-digit'}) : '';
+      const progression = el('span', 'tour-avancement', texte); progression.hidden = !texte; d.append(progression);
+    }
     if (p.note) {
       const n = el("span", "note", "« " + court(p.note, 160) + " »");
       if (p.note.length > 160) n.dataset.infobulle = court(p.note, 600);

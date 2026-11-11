@@ -88,6 +88,7 @@ Commandes de l'auteur :
               --json         sortie JSON
 
 Commandes de la navette (auteur et agent) :
+  progress --text "…" [dossier]  annonce une étape (120 caractères au plus)
   status    à qui est la main, tour, annotations, anomalies
               --json         sortie JSON
   list      énumère les annotations des fichiers
@@ -96,6 +97,7 @@ Commandes de la navette (auteur et agent) :
               --kind K       comment, highlight, addition, deletion, substitution
               --status S     new (de ce tour) ou open (remise, en attente)
               --by B         author ou agent
+              --task ID      annotations ou réponses créées par cette consigne
               --mine         pendant un tour à plusieurs agents, celles qui ne
                              sont pas confiées aux agents lancés par Glose
               --to NOM       les annotations que doit traiter ce nom court
@@ -205,6 +207,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return cmdOpen(rest, stdout, stderr)
 	case "stop":
 		return cmdStop(rest, stdout, stderr)
+	case "progress":
+		return cmdProgress(rest, stdout, stderr)
 	case "status":
 		return cmdStatus(rest, stdout, stderr)
 	case "list":
@@ -450,6 +454,7 @@ type listItem struct {
 	// the default one; Via the agent that wrote a proposal of the agent.
 	To    string `json:"to,omitempty"`
 	Via   string `json:"via,omitempty"`
+	Task  string `json:"task,omitempty"`
 	Model string `json:"model,omitempty"` // model of that agent (P10.11)
 }
 
@@ -471,9 +476,10 @@ type listIssue struct {
 
 func cmdList(args []string, stdout, stderr io.Writer) int {
 	var asJSON bool
-	var kind, file, status, by, agent, to string
+	var kind, file, status, by, agent, to, task string
 	var mine bool
 	path, ok := parse("list", args, stderr, func(fs *flag.FlagSet) {
+		fs.StringVar(&task, "task", "", "")
 		fs.StringVar(&to, "to", "", "")
 		fs.BoolVar(&mine, "mine", false, "")
 		fs.BoolVar(&asJSON, "json", false, "")
@@ -489,6 +495,9 @@ func cmdList(args []string, stdout, stderr io.Writer) int {
 	kinds := map[string]bool{"": true, "comment": true, "highlight": true, "addition": true, "deletion": true, "substitution": true}
 	if !kinds[kind] {
 		return usageError(stderr, fmt.Sprintf("list : type inconnu %q", kind))
+	}
+	if task != "" && !review.ValidName(task) {
+		return usageError(stderr, "list : identifiant de mission invalide")
 	}
 	if by != "" && by != "author" && by != "agent" {
 		return usageError(stderr, fmt.Sprintf("list : auteur inconnu %q (author ou agent)", by))
@@ -586,9 +595,9 @@ func cmdList(args []string, stdout, stderr io.Writer) int {
 		}
 		navette.Annotate(fm.Annotations, h)
 		for _, a := range fm.Annotations {
-			if (kind == "" || a.Kind == kind) && (status == "" || a.Status == status) && (by == "" || a.By == by) && wanted(a) {
+			if (kind == "" || a.Kind == kind) && (status == "" || a.Status == status) && (by == "" || a.By == by) && wanted(a) && (task == "" || a.Task == task || messageTask(a.Messages, task)) {
 				items = append(items, listItem{File: fm.Path, ID: a.ID, By: a.By, Status: a.Status, Turn: a.Turn, Messages: a.Messages, Line: a.Line, Column: a.Column, Start: a.Start, End: a.End,
-					Kind: a.Kind, Text: a.Text, New: a.New, Comments: a.Comments, Context: annotationContext(fm.Src, a.Start, a.End), To: a.To, Via: a.Via, Model: a.Model})
+					Kind: a.Kind, Text: a.Text, New: a.New, Comments: a.Comments, Context: annotationContext(fm.Src, a.Start, a.End), To: a.To, Via: a.Via, Model: a.Model, Task: a.Task})
 			}
 		}
 		for _, is := range fm.Issues {
@@ -601,7 +610,13 @@ func cmdList(args []string, stdout, stderr io.Writer) int {
 	if asJSON {
 		enc := json.NewEncoder(stdout)
 		enc.SetIndent("", "  ")
-		enc.Encode(map[string]any{"project": p.Root, "annotations": items, "issues": problems})
+		imposed := []journal.Closed{}
+		for _, c := range h.Imposed() {
+			if inPart(c.File) {
+				imposed = append(imposed, c)
+			}
+		}
+		enc.Encode(map[string]any{"project": p.Root, "annotations": items, "issues": problems, "imposed": imposed})
 		return ExitOK
 	}
 	names := map[string]string{"comment": "commentaire", "highlight": "passage commenté", "addition": "ajout",
@@ -642,7 +657,14 @@ func cmdList(args []string, stdout, stderr io.Writer) int {
 	for _, pb := range problems {
 		fmt.Fprintf(stdout, "%s:%d:%d  anomalie  %s\n", pb.File, pb.Line, pb.Column, pb.Message)
 	}
-	if len(items) == 0 && len(problems) == 0 {
+	imposed := 0
+	for _, c := range h.Imposed() {
+		if inPart(c.File) {
+			fmt.Fprintf(stdout, "%s:%d  [imposé par l'auteur]  %s\n", c.File, c.Line, imposedText(c))
+			imposed++
+		}
+	}
+	if len(items) == 0 && len(problems) == 0 && imposed == 0 {
 		fmt.Fprintln(stdout, "Aucune annotation.")
 	}
 	return ExitOK
@@ -694,6 +716,9 @@ func cmdCheck(args []string, stdout, stderr io.Writer) int {
 	}
 	var out []finding
 	add := func(level, subject, msg string) { out = append(out, finding{level, subject, msg}) }
+	if _, err := agents.Load(); err != nil {
+		add("error", "consignes globales", err.Error())
+	}
 	p, err := project.Load(path)
 	if err != nil {
 		add("error", "profil", err.Error())
@@ -833,4 +858,13 @@ func cmdRender(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	return ExitOK
+}
+
+func messageTask(messages []render.Message, task string) bool {
+	for _, m := range messages {
+		if m.Task == task {
+			return true
+		}
+	}
+	return false
 }

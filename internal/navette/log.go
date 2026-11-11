@@ -13,20 +13,23 @@ type OpLog struct {
 	Created []string         `json:"created"`
 	Closed  []journal.Closed `json:"closed"`
 	Revised []journal.Closed `json:"revised,omitempty"`
+	// Reverted: the direct changes this operation undoes (D-57).
+	Reverted []string `json:"reverted,omitempty"`
 }
 
 // TurnLog is one part of the exchange: the operations made while one actor
 // had the hand, then the handover that ended it. The last part, still
 // running, has no actor.
 type TurnLog struct {
-	Number    int            `json:"number"`
-	Round     int            `json:"round"`           // the round trip (D-31): (number + 1) / 2
-	Actor     string         `json:"actor,omitempty"` // who handed over; empty for the current part
-	Time      string         `json:"time,omitempty"`
-	Note      string         `json:"note,omitempty"`
-	Reclaimed bool           `json:"reclaimed,omitempty"`
-	Counts    map[string]int `json:"counts,omitempty"` // annotations handed over, by kind
-	Ops       []OpLog        `json:"operations"`
+	Task      *journal.TaskInfo `json:"task,omitempty"`
+	Number    int               `json:"number"`
+	Round     int               `json:"round"`           // the round trip (D-31): (number + 1) / 2
+	Actor     string            `json:"actor,omitempty"` // who handed over; empty for the current part
+	Time      string            `json:"time,omitempty"`
+	Note      string            `json:"note,omitempty"`
+	Reclaimed bool              `json:"reclaimed,omitempty"`
+	Counts    map[string]int    `json:"counts,omitempty"` // annotations handed over, by kind
+	Ops       []OpLog           `json:"operations"`
 }
 
 // Log groups the effective operations of the history by part, in order.
@@ -36,6 +39,7 @@ func (h *History) Log() []TurnLog {
 	cur := TurnLog{Number: 1, Round: 1, Ops: []OpLog{}}
 	flush := func(ev *journal.Event) {
 		if ev != nil {
+			cur.Task = ev.TurnEv.Task
 			cur.Actor, cur.Time, cur.Note, cur.Reclaimed, cur.Counts = ev.Actor, ev.Time, ev.TurnEv.Note, ev.TurnEv.Reclaimed, ev.TurnEv.Counts
 		}
 		turns = append(turns, cur)
@@ -46,7 +50,7 @@ func (h *History) Log() []TurnLog {
 			flush(&h.Turns[ti])
 			ti++
 		}
-		o := OpLog{Seq: op.Seq, Time: op.Time, Actor: op.Actor, Kind: op.Kind, Created: op.Created, Closed: op.Closed, Revised: op.Revised}
+		o := OpLog{Seq: op.Seq, Time: op.Time, Actor: op.Actor, Kind: op.Kind, Created: op.Created, Closed: op.Closed, Revised: op.Revised, Reverted: op.Reverted}
 		for _, f := range op.Files {
 			o.Files = append(o.Files, f.Path)
 		}

@@ -173,6 +173,7 @@ class Page {
     cdp.listeners.push(this.listener);
   }
   send(method, params) { return this.cdp.send(method, params, this.session); }
+  async viewport(width, height) { return this.send('Emulation.setDeviceMetricsOverride', {width, height, deviceScaleFactor: 1, mobile: false}); }
   async evaluate(fn, ...args) {
     const result = await this.send('Runtime.evaluate', {
       expression: `(${fn.toString()})(...${JSON.stringify(args)})`, awaitPromise: true, returnByValue: true, userGesture: true,

@@ -1,7 +1,7 @@
 "use strict";
 // Turn display, agent presence and handoff/reclaim dialog (P8.3).
 window.GloseNavette = (() => {
-  function creer({ $, S, api, avis, el, icone, court, quand, agents, majBoutons, charger, saisieEnCours }) {
+  function creer({ $, S, api, avis, el, icone, court, quand, agents, majBoutons, charger, saisieEnCours, voirAnnotation }) {
     const { modeleCourt } = GloseDonnees;
     const NOMS_PUCES = { comments: "commentaire", proposals: "suggestion", replies: "réponse" };
     const nomAlias = (a) => a.name + ' (' + ({ claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode' }[a.agent] || a.agent) + (a.model ? ', ' + a.model : '') + ')';
@@ -45,9 +45,109 @@ window.GloseNavette = (() => {
     const lancerARemise = () => !$('remise-lancement').hidden && $('remise-lancer').checked && !$('remise-lancer').disabled;
     const choixLancement = () => ($('remise-lancement').hidden ? undefined : lancerARemise());
 
+    let apercuConsigne = null, generationConsigne = 0;
+    const tacheChoisie = () => (S.doc.tasks || []).find(t => t.id === $('remise-consigne').value);
+    function barreConsignes() {
+      const zone = $('consignes-barre'); zone.textContent = '';
+      for (const t of S.doc.tasks || []) {
+        if (!(t.place || []).includes('bar')) continue;
+        // P20: icon and name, the accent of the actions that launch an agent.
+        const b = el('button', ''); b.type = 'button'; b.dataset.task = t.id;
+        b.dataset.infobulle = 'Lancer la consigne « ' + t.name + ' »'; b.setAttribute('aria-label', t.name);
+        b.innerHTML = icone(t.icon); b.append(el('span', '', t.name)); b.disabled = S.doc.state.hand === 'agent';
+        b.addEventListener('click', () => ouvrirRemise(t.id)); zone.append(b);
+      }
+    }
+    async function apercuTache() {
+      const n = ++generationConsigne; apercuConsigne = null;
+      $('remise-blocages').textContent = '';
+      const t = tacheChoisie();
+      $('remise-lancement').hidden = !!t || !(S.doc && S.doc.textAgent);
+      $('remise').classList.toggle('lancement', !!t);
+      if (!t) { $('remise-titre').textContent = 'Remettre la main à l’agent'; $('remise-ok').textContent = 'Remettre'; $('remise-acces').textContent = ''; $('remise-ok').disabled = false; return; }
+      $('remise-ok').disabled = true;
+      const files = [...$('remise-fichiers').querySelectorAll('input:checked')].map(i => i.value);
+      const params = new URLSearchParams({id:t.id}); for (const f of files) params.append('file',f);
+      $('remise-acces').textContent = 'Vérification des accès…';
+      const r = await api('/api/tasks/preview?' + params);
+      if (n !== generationConsigne) return;
+      if (!r.ok) { $('remise-acces').textContent = r.data.message || 'Consigne indisponible.'; return; }
+      apercuConsigne = r.data;
+      $('remise-ok').disabled = !!(r.data.blocks || []).length;
+      $('remise-blocages').textContent = '';
+      // P20 (docs/maquettes/p20/lancement.html): what blocks the launch is
+      // said before the click, in a notice, with the way to the annotation.
+      for (const b of r.data.blocks || []) {
+        const encart = el('div', 'remise-encart'), tete = el('p', 'remise-encart-tete');
+        tete.innerHTML = icone('alerte'); tete.append(el('strong', '', 'Lancement en attente'));
+        const lien = el('button', 'lien', 'Aller à la première annotation'); lien.type = 'button';
+        lien.addEventListener('click', () => { $('remise').close(); S.remise = null; voirAnnotation(b); });
+        encart.append(tete, el('p', '', b.message), lien); $('remise-blocages').append(encart);
+      }
+      const q = r.data.task, a = q.access || {};
+      const titre = $('remise-titre'), tuile = el('span', 'remise-tuile'), nomT = el('span', 'remise-nom');
+      tuile.innerHTML = icone(t.icon); nomT.append(el('span', '', t.name));
+      if (t.description) nomT.append(el('small', '', t.description));
+      titre.replaceChildren(tuile, nomT);
+      $('remise-ok').textContent = 'Lancer'; $('remise-ok').insertAdjacentHTML('afterbegin', icone('essayer'));
+      const zone = $('remise-acces'); zone.textContent = '';
+      const meta = el('dl', 'remise-meta');
+      for (const [cle, valeur] of [['Agent', nomAlias(q.agent)], [q.files.length > 1 ? 'Fichiers' : 'Fichier', q.files.join(', ')]]) meta.append(el('dt', '', cle), el('dd', '', valeur));
+      zone.append(meta, el('h3', '', 'Accès accordés'));
+      const liste = el('ul', 'remise-droits');
+      // Each access with its answer: a check when granted, a cross otherwise.
+      const droit = (oui, nom, valeur) => {
+        const li = el('li', oui ? 'accorde' : ''); li.innerHTML = icone(oui ? 'resoudre' : 'rejeter');
+        const texte = el('span'); texte.append(el('strong', '', nom + ' : '), document.createTextNode(valeur));
+        li.append(texte); liste.append(li);
+      };
+      droit(true, 'Lire', a.externalDirs === 'all' ? 'tous les dossiers (déconseillé)' : a.externalDirs === 'list' ? ['le projet', ...(a.dirs || [])].join(', ') : 'le projet');
+      droit(!!a.externalWrite, 'Écrire hors du projet', a.externalWrite ? (a.dirs || []).join(', ') || 'dossiers listés' : 'non');
+      droit(!!a.web, 'Web', a.web ? 'oui' : 'non');
+      droit(a.scripts === 'python' || a.scripts === 'shell', 'Scripts', ({python:'Python', shell:'tout le shell'}[a.scripts] || 'non'));
+      droit(!!a.subagents, 'Sous-agents', a.subagents ? 'oui' : 'non');
+      droit(!!(a.mcp || []).length, 'MCP', (a.mcp || []).join(', ') || 'aucun');
+      zone.append(liste);
+      const details = el('details'), resume = el('summary'); resume.innerHTML = icone('a-chevron'); resume.append('Détails'); details.append(resume);
+      details.append(el('p', '', 'Dossier : ' + q.workdir), el('p', '', 'Durée maximale : ' + q.maxMinutes + ' min'));
+      for (const warning of q.warnings || []) details.append(el('p', '', warning));
+      details.append(el('p', '', 'Pour changer ces accès, modifiez la consigne dans glose set.')); zone.append(details);
+
+    }
+    function fichiersTache() {
+      const t = tacheChoisie(), zone = $('remise-fichiers'); zone.textContent = '';
+      if (!t) { apercuTache(); return; }
+      const scope = t.scope || 'file';
+      const visibles = [...document.querySelectorAll('#texte .glose-file')];
+      const courant = visibles.find(e => e.getBoundingClientRect().bottom > 160) || visibles[0];
+      const courantPath = courant && courant.dataset.path;
+      if (scope !== 'project') {
+        zone.append(el('p','aide',scope === 'file' ? 'Fichier affiché (vérifiez la sélection) :' : 'Choisissez les fichiers :'));
+        for (const f of S.doc.files) {
+          const label = el('label','case'), input = el('input');
+          input.type = scope === 'file' ? 'radio' : 'checkbox'; input.name = 'consigne-fichier'; input.value = f.path;
+          input.checked = f.path === courantPath || (!courantPath && f === S.doc.files[0]);
+          input.addEventListener('change',apercuTache); label.append(input,document.createTextNode(f.path)); zone.append(label);
+        }
+      }
+      apercuTache();
+    }
+    function preparerConsignes(id, reprise) {
+      $('remise-consignes').hidden = reprise; apercuConsigne = null; ++generationConsigne;
+      const select = $('remise-consigne'); select.textContent = '';
+      const aucun = el('option','','Aucune (remise habituelle)'); aucun.value = ''; select.append(aucun);
+      for (const t of S.doc.tasks || []) {
+        const o = el('option','',t.name); o.value = t.id; select.append(o);
+      }
+      select.value = id || '';
+      if (!reprise) fichiersTache();
+    }
+    $('remise-consigne').addEventListener('change',fichiersTache);
+
     // ---------- Turn ownership and handoff ----------
     function majNavette() {
       const st = S.doc.state;
+      barreConsignes();
       const zone = $("navette");
       zone.textContent = "";
       if (!st) return;
@@ -72,9 +172,16 @@ window.GloseNavette = (() => {
       if (agent) {
         fort = !pres.present ? pres.libelle
           : !pres.pris ? pres.nom + " va prendre la main"
-          : detail.length ? pres.nom + " travaille" + (pres.etape || "") + " · " + detail.join(", ") : pres.lance ? pres.nom + " travaille" + (pres.etape || "") : pres.nom + " a pris la main";
+          : (detail.length || (st.agent && st.agent.progress)) ? pres.nom + " travaille" + (pres.etape || "") + (detail.length ? " · " + detail.join(", ") : "") : pres.lance ? pres.nom + " travaille" + (pres.etape || "") : pres.nom + " a pris la main";
       }
+      if (agent && st.task && pres.present) fort = st.task.agent.name + ' travaille · « ' + st.task.name + ' »';
       zone.append(el("strong", "", fort));
+      const a = st.agent;
+      const avancement = agent && pres.present && a && a.fresh && a.taken && a.progress
+        ? a.progress + ' · ' + new Date(a.progressAt).toLocaleTimeString('fr-FR', {hour:'2-digit',minute:'2-digit'}) : '';
+      if (avancement) zone.append(el('small', 'agent-avancement', avancement));
+      for (const cible of document.querySelectorAll('.tour-avancement')) { cible.textContent = avancement; cible.hidden = !avancement; }
+
       const petit = [];
       if (!agent) petit.push(pres.present ? pres.nom + " attend" : pres.libelle);
       if (depuis) petit.push((st.reclaimed ? "Reprise " : agent ? "Remise " : "Rendue ") + quand(depuis));
@@ -102,8 +209,6 @@ window.GloseNavette = (() => {
       const nomMain = agent ? ((S.doc.run && S.doc.run.running && S.doc.run.alias) || (st.agent && st.agent.name) || "Agent") : "Auteur";
       $("main-navette").textContent = "Main : " + nomMain;
       $("carte-tour").querySelector(".jeton").dataset.infobulle = $("main-navette").textContent + " · " + zone.textContent;
-      const ouverts = ((st.statuses && st.statuses.new) || 0) + ((st.statuses && st.statuses.open) || 0);
-      $("resume-tour").textContent = tour + " · " + ouverts + " annotation" + (ouverts > 1 ? "s" : "") + " ouverte" + (ouverts > 1 ? "s" : "");
       $("remettre-libelle").textContent = agent ? "Reprendre la main" : "Remettre à l'agent";
       $("remettre-court").textContent = agent ? "Reprendre" : "Remettre";
       const bt = $("remettre");
@@ -178,7 +283,8 @@ window.GloseNavette = (() => {
           " (dernier signe " + quand(new Date(a.seen)) + ")." };
     }
 
-    function ouvrirRemise() {
+    function ouvrirRemise(id) {
+      if (typeof id !== "string") id = "";
       const st = S.doc && S.doc.state;
       if (!st) return;
       // Hand over nothing while an input is open: it would stay out of the turn.
@@ -215,17 +321,26 @@ window.GloseNavette = (() => {
       $("remise-message").textContent = "";
       $("remise-force").hidden = true;
       $("remise-ok").textContent = agent ? "Reprendre la main" : "Remettre";
+      preparerConsignes(id, agent);
+      if (agent) $("remise-ok").disabled = false;
       $("remise").showModal();
       $("remise-note").focus();
     }
 
     async function remettre(force) {
       if (!S.remise || S.envoi) return;
+      if (!S.remise.reprise && tacheChoisie() && (!apercuConsigne || (apercuConsigne.blocks || []).length)) return;
       S.envoi = true;
       S.occupe++;
       $("remise-ok").disabled = true;
       const corps = { note: $("remise-note").value.trim(), force: !!force };
-      if (!S.remise.reprise) corps.launch = choixLancement();
+      if (!S.remise.reprise) {
+        corps.launch = choixLancement();
+        if (tacheChoisie()) {
+          corps.task = apercuConsigne.task.id; corps.files = apercuConsigne.task.files;
+          corps.taskHash = apercuConsigne.hash; corps.confirmAccess = true; corps.launch = true;
+        }
+      }
       const r = await api(S.remise.reprise ? "/api/reclaim" : "/api/handoff", corps);
       $("remise-ok").disabled = false;
       S.envoi = false;
@@ -263,8 +378,8 @@ window.GloseNavette = (() => {
       $("remettre").addEventListener("click", ouvrirRemise);
       $("remise").querySelector("form").addEventListener("submit", (e) => { e.preventDefault(); remettre(false); });
       $("remise-force").addEventListener("click", () => remettre(true));
-      $("remise-fermer").addEventListener("click", () => { S.remise = null; $("remise").close(); });
-      $("remise-lier").addEventListener("click", () => { S.remise = null; $("remise").close(); agents.ouvrirLien(); });
+      $("remise-fermer").addEventListener("click", () => { S.remise = null; ++generationConsigne; apercuConsigne = null; $("remise").close(); });
+      $("remise-lier").addEventListener("click", () => { S.remise = null; ++generationConsigne; apercuConsigne = null; $("remise").close(); agents.ouvrirLien(); });
       // Launching counts as a listening agent: the warning follows the checkbox.
       $("remise-lancer").addEventListener("change", () => {
         const pres = presenceAgent(S.doc && S.doc.state);

@@ -33,12 +33,17 @@
 <a class="evitement" href="#texte">Aller au texte</a>
 <header id="barre">
   <div class="barre-haut">
-    <a id="retour-accueil" class="marque" href="/home" aria-label="Vos projets" data-infobulle="Vos projets"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" data-icone="a-projet"></svg><span>Glose</span></a>
-    <div class="fil-ariane"><a href="/home">Projets</a><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" data-icone="a-chevron"></svg><h1 id="titre" data-infobulle="Glose">Glose</h1></div>
-    <small id="resume-tour"></small>
-    <div class="ancre">
-      <button id="bouton-reglages" type="button" class="icone" aria-controls="reglages" aria-expanded="false" aria-label="Réglages d'affichage" data-infobulle="Réglages d'affichage"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" data-icone="reglages"></svg><span>Affichage</span></button>
-      <div id="reglages" hidden role="dialog" aria-label="Réglages d'affichage">
+    <a id="retour-accueil" class="marque" href="/home" aria-label="Vos projets" data-infobulle="Vos projets"><span>glose</span></a>
+    <div class="fil-ariane">
+      <h1 id="titre" data-infobulle="Glose">Glose</h1>
+      <small class="portee"><span id="portee"></span><span id="avancement" aria-label="Avancement des sections affichées"><span>Avancement inconnu</span><progress max="100" value="0"></progress></span></small>
+    </div>
+    <div class="actions-haut">
+      <button id="annuler" type="button" class="discret" disabled aria-label="Annuler" data-infobulle="Annuler votre dernière action (Ctrl+Z)"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" data-icone="annuler"></svg><span>Annuler</span></button>
+      <button id="retablir" type="button" class="discret" disabled aria-label="Rétablir" data-infobulle="Rétablir (Ctrl+Y)"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" data-icone="retablir"></svg><span>Rétablir</span></button>
+      <div class="ancre">
+        <button id="bouton-reglages" type="button" class="discret" aria-controls="reglages" aria-expanded="false" aria-label="Réglages d'affichage" data-infobulle="Réglages d'affichage : police, taille, interligne, largeur, thème"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" data-icone="configurer"></svg><span>Réglages</span></button>
+        <div id="reglages" hidden role="dialog" aria-label="Réglages d'affichage">
         <h2>Affichage</h2>
         <label>Police
           <select id="r-police">
@@ -66,13 +71,16 @@
         </label>
         <button id="r-defaut" type="button">Réglages par défaut</button>
       </div>
+      </div>
     </div>
   </div>
   <div id="carte-tour">
     <span class="jeton" aria-hidden="true"><svg class="ic si-auteur" viewBox="0 0 24 24" data-icone="vous"></svg><svg class="ic si-agent" viewBox="0 0 24 24" data-icone="agent"></svg></span>
-    <div class="etat-navette"><strong id="main-navette">Main : Auteur</strong><div id="navette"></div></div>
+    <strong id="main-navette">Main : Auteur</strong>
+    <div class="etat-navette"><div id="navette"></div></div>
     <span class="points si-agent" aria-hidden="true"><i></i><i></i><i></i></span>
     <span id="puces" class="puces" aria-hidden="true"></span>
+    <button id="voir-sortie" type="button" class="discret" hidden data-infobulle="Ce que fait l'agent lancé par Glose"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" data-icone="sortie"></svg><span>Afficher la sortie</span></button>
     <button id="remettre" type="button" class="principal" hidden><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" data-icone="remettre"></svg><span id="remettre-libelle">Remettre à l'agent</span><span id="remettre-court" aria-hidden="true">Remettre</span></button>
     <button id="configurer-agents" type="button" class="configurer-agents" hidden data-infobulle="Aucun agent configuré : choisir l'agent et le modèle par défaut (glose set)"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" data-icone="configurer"></svg> Configurer</button>
     <div class="ancre">
@@ -88,19 +96,39 @@
     <span id="navette-annonce" class="visuellement-cache" role="status" aria-live="polite"></span>
   </div>
   <div class="barre-document">
-  <div class="barre-outils" role="toolbar" aria-label="Affichage">
-    <div id="vues" class="segmente" role="radiogroup" aria-label="Vue du texte">
-      <button type="button" role="radio" data-vue="relecture" aria-label="Relecture" data-infobulle="Relecture : les propositions visibles, ajouts soulignés et suppressions barrées (touche 1)"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" data-icone="relecture"></svg><span>Modifications</span></button>
-      <button type="button" role="radio" data-vue="actuel" aria-label="Actuel" data-infobulle="Actuel : le texte tel qu'il est, propositions refusées (touche 2)"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" data-icone="actuel"></svg><span>Actuel</span></button>
-      <button type="button" role="radio" data-vue="propose" aria-label="Proposé" data-infobulle="Proposé : le texte si toutes les propositions étaient acceptées (touche 3)"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" data-icone="propose"></svg><span>Proposé</span></button>
+    <div class="groupe-vues">
+      <div id="vues" class="segmente" role="radiogroup" aria-label="Vue du texte">
+        <button type="button" role="radio" data-vue="relecture" aria-label="Relecture" data-infobulle="Relecture : les propositions visibles, ajouts soulignés et suppressions barrées (touche 1)"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" data-icone="relecture"></svg><span>Modifications</span></button>
+        <button type="button" role="radio" data-vue="actuel" aria-label="Actuel" data-infobulle="Actuel : le texte tel qu'il est, propositions refusées (touche 2)"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" data-icone="actuel"></svg><span>Actuel</span></button>
+        <button type="button" role="radio" data-vue="propose" aria-label="Proposé" data-infobulle="Proposé : le texte si toutes les propositions étaient acceptées (touche 3)"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" data-icone="propose"></svg><span>Proposé</span></button>
+        <button type="button" role="radio" data-vue="depuis" aria-label="Depuis" data-infobulle="Depuis une remise de l’auteur : lecture seule"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" data-icone="horloge"></svg><span>Depuis</span></button>
+      </div>
+      <div class="options-vue">
+        <label id="depuis-choix" hidden>Référence <select id="depuis-reference" aria-label="Remise de référence"></select></label>
+        <label id="mission-choix" hidden>Mission <select id="mission-filtre" aria-label="Filtrer la marge par mission"><option value="">Toutes</option></select></label>
+      </div>
     </div>
-    <span class="filet-barre" aria-hidden="true"></span>
-    <button id="annuler" type="button" class="icone" disabled aria-label="Annuler" data-infobulle="Annuler votre dernière action (Ctrl+Z)"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" data-icone="annuler"></svg></button>
-    <button id="retablir" type="button" class="icone" disabled aria-label="Rétablir" data-infobulle="Rétablir (Ctrl+Y)"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" data-icone="retablir"></svg></button>
-    <span class="filet-barre" aria-hidden="true"></span>
-    <div class="ancre">
-      <button id="exporter" type="button" class="icone" aria-controls="export" aria-expanded="false" aria-label="Exporter en PDF" data-infobulle="Exporter en PDF"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" data-icone="exporter"></svg></button>
-      <div id="export" hidden role="dialog" aria-label="Exporter en PDF">
+    <div class="barre-outils" role="toolbar" aria-label="Outils">
+      <button id="ouvrir-recherche" type="button" class="discret" aria-label="Rechercher dans le projet" data-infobulle="Rechercher dans tout le projet (Ctrl+Maj+F)"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" data-icone="chercher"></svg><span>Rechercher</span></button>
+      <div class="ancre ancre-recherche">
+        <div class="champ-recherche">
+      <svg class="ic" viewBox="0 0 24 24" aria-hidden="true" data-icone="chercher"></svg>
+      <label for="recherche-texte" class="visuellement-cache">Rechercher dans tout le projet</label>
+      <input id="recherche-texte" type="search" autocomplete="off" spellcheck="false" maxlength="512" placeholder="Rechercher" aria-controls="recherche" aria-expanded="false">
+      <kbd aria-hidden="true">Ctrl ⇧ F</kbd>
+    </div>
+        <div id="recherche" class="deroulant" role="dialog" aria-label="Résultats de la recherche dans le projet" hidden>
+      <div class="deroulant-tete">
+        <p id="recherche-statut" role="status"></p>
+        <label class="case"><input type="checkbox" id="recherche-casse"> Respecter les majuscules</label>
+      </div>
+      <div id="recherche-resultats"></div>
+      <p class="aide">Recherche littérale dans le Markdown de la vue Actuel ou Proposé, dans tous les fichiers, même non affichés. ↑ ↓ pour parcourir, Entrée pour ouvrir, Échap pour fermer.</p>
+    </div>
+      </div>
+      <div class="ancre">
+        <button id="exporter" type="button" class="discret" aria-controls="export" aria-expanded="false" aria-label="Exporter en PDF" data-infobulle="Exporter en PDF"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" data-icone="exporter"></svg><span>Exporter en PDF</span></button>
+        <div id="export" hidden role="dialog" aria-label="Exporter en PDF">
         <h2>Exporter en PDF</h2>
         <fieldset>
           <legend>Version</legend>
@@ -113,27 +141,21 @@
         <p>Dans la fenêtre d'impression, choisissez « Enregistrer au format PDF ».</p>
         <button id="export-ok" type="button" class="principal">Exporter</button>
       </div>
-    </div>
-
-  </div>
-  <button id="ouvrir-recherche" type="button" class="icone" aria-label="Rechercher dans le projet" data-infobulle="Rechercher (Ctrl+Maj+F)"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" data-icone="chercher"></svg></button>
-  <div class="ancre ancre-recherche">
-    <div class="champ-recherche">
-      <svg class="ic" viewBox="0 0 24 24" aria-hidden="true" data-icone="chercher"></svg>
-      <label for="recherche-texte" class="visuellement-cache">Rechercher dans tout le projet</label>
-      <input id="recherche-texte" type="search" autocomplete="off" spellcheck="false" maxlength="512" placeholder="Rechercher" aria-controls="recherche" aria-expanded="false">
-      <kbd aria-hidden="true">Ctrl ⇧ F</kbd>
-    </div>
-    <div id="recherche" class="deroulant" role="dialog" aria-label="Résultats de la recherche dans le projet" hidden>
-      <div class="deroulant-tete">
-        <p id="recherche-statut" role="status"></p>
-        <label class="case"><input type="checkbox" id="recherche-casse"> Respecter les majuscules</label>
       </div>
-      <div id="recherche-resultats"></div>
-      <p class="aide">Recherche littérale dans le Markdown de la vue Actuel ou Proposé, dans tous les fichiers, même non affichés. ↑ ↓ pour parcourir, Entrée pour ouvrir, Échap pour fermer.</p>
+      <span class="filet-barre" aria-hidden="true"></span>
+      <span id="consignes-barre" role="group" aria-label="Consignes"></span>
+      <label id="typo-choix" hidden>Fichier <select id="typo-fichier" aria-label="Fichier pour Typo"></select></label>
+      <button id="typo-lancer" type="button" class="discret" data-infobulle="Typo : corrections typographiques proposées sur le fichier affiché"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" data-icone="spell-check"></svg><span>Typo</span></button>
+      <button id="typo-accepter" type="button" class="discret" hidden>Tout accepter (Typo)</button>
+      <div class="ancre ancre-plus">
+        <button id="plus-bouton" type="button" class="discret" aria-haspopup="menu" aria-expanded="false" aria-controls="plus-menu" data-infobulle="Autres actions"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" data-icone="points"></svg><span>Plus</span></button>
+        <div id="plus-menu" class="menu-navette" role="menu" aria-label="Autres actions" hidden>
+          <button type="button" role="menuitem" data-relais="ouvrir-recherche"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" data-icone="chercher"></svg>Rechercher</button>
+          <button type="button" role="menuitem" data-relais="annuler"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" data-icone="annuler"></svg>Annuler</button>
+          <button type="button" role="menuitem" data-relais="retablir"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" data-icone="retablir"></svg>Rétablir</button>
+        </div>
+      </div>
     </div>
-  </div>
-  <div id="avancement" aria-label="Avancement des sections affichées"><span>Avancement inconnu</span><progress max="100" value="0"></progress></div>
   </div>
 </header>
 <div id="reserve-barres" aria-hidden="true"></div>
@@ -264,7 +286,7 @@
       <p id="edition-message" role="alert"></p>
       <p id="edition-brouillon" class="statut-brouillon" role="status"></p>
     </div>
-    <div class="panneau-actions"><button type="button" id="edition-annuler">Annuler</button><button type="submit" id="edition-ok" class="principal" data-infobulle="Enregistrer comme propositions (Ctrl+Entrée)">Ajouter la suggestion <kbd>Ctrl ↵</kbd></button></div>
+    <div class="panneau-actions"><button type="button" id="edition-annuler">Annuler</button><button type="button" id="edition-direct" class="direct" data-infobulle="Modifier le texte tout de suite, sans proposition : l'agent ne la discute pas (Ctrl+Maj+Entrée)">Appliquer directement <kbd>Ctrl ⇧ ↵</kbd></button><button type="submit" id="edition-ok" class="principal" data-infobulle="Enregistrer comme propositions (Ctrl+Entrée)">Ajouter la suggestion <kbd>Ctrl ↵</kbd></button></div>
   </form>
 </dialog>
 <dialog id="brouillons" class="panneau" aria-labelledby="brouillons-titre">
@@ -284,6 +306,12 @@
       <label class="case"><input type="checkbox" id="remise-lancer"> <span id="remise-lancer-texte">Lancer l'agent à la remise</span></label>
       <ul id="remise-outils" class="remise-outils" hidden></ul>
     </div>
+    <div id="remise-consignes">
+      <label for="remise-consigne">Consigne</label><select id="remise-consigne"></select>
+      <div id="remise-fichiers"></div>
+      <div id="remise-blocages" aria-live="polite"></div>
+      <div id="remise-acces" aria-live="polite"></div>
+    </div>
     <label for="remise-note">Note pour l'agent (facultative)</label>
     <textarea id="remise-note" rows="3"></textarea>
     <div id="remise-message" role="alert"></div>
@@ -291,7 +319,7 @@
       <button type="button" id="remise-force" hidden>Reprendre sans convertir</button>
       <button type="button" id="remise-lier"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true" data-icone="lien"></svg> Lier un agent</button>
       <span class="espace"></span>
-      <button type="button" id="remise-fermer">Fermer</button>
+      <button type="button" id="remise-fermer">Annuler</button>
       <button type="submit" id="remise-ok" class="principal">Remettre</button>
     </div>
   </form>

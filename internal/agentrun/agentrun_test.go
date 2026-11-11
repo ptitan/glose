@@ -158,3 +158,10 @@ func TestTurnPromptSaysOneCommandAtATime(t *testing.T) {
 		t.Fatalf("consigne : %s", p)
 	}
 }
+
+func TestTurnPromptRequestsProgress(t *testing.T) {
+	p := TurnPrompt("Sol", "racine", "", nil)
+	if !strings.Contains(p, "glose progress --text") || !strings.Contains(p, "120 caractères") || !strings.Contains(p, "chaque étape notable") {
+		t.Fatal(p)
+	}
+}

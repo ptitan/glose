@@ -51,6 +51,12 @@ type ComputeWith func(src []byte, gen *review.Gen, h *History) (patch.Edit, erro
 
 // DoWith is Do, with the history passed to compute.
 func (n *Navette) DoWith(actor string, file int, hash, kind, decision string, compute ComputeWith) (*Result, error) {
+	return n.Run(actor, file, hash, &Spec{Kind: kind, Decision: decision}, compute)
+}
+
+// Run is DoWith, the operation described by spec, which compute may complete
+// (the direct changes it makes, those it undoes): it is read after compute.
+func (n *Navette) Run(actor string, file int, hash string, spec *Spec, compute ComputeWith) (*Result, error) {
 	if file < 0 || file >= len(n.P.Files) {
 		return nil, ErrFile
 	}
@@ -84,8 +90,21 @@ func (n *Navette) DoWith(actor string, file int, hash, kind, decision string, co
 	if err != nil {
 		return nil, err
 	}
+	if actor == review.Agent {
+		e, err = review.LabelTask(d.Bytes, e, h.ActiveTask())
+		if err != nil {
+			return nil, err
+		}
+	}
+	// Only the author changes the text directly (D-14, D-57).
+	if (len(spec.Direct) > 0 || len(spec.Reverted) > 0) && actor != review.Author {
+		return nil, ErrDirectAgent
+	}
+	for i := range spec.Direct {
+		spec.Direct[i].File = n.P.Files[file]
+	}
 	after := e.Apply(d.Bytes)
-	if err := n.Commit(actor, kind, decision, "", []Change{{File: file, Before: d.Bytes, After: after}}); err != nil {
+	if err := n.commit(actor, spec, "", []Change{{File: file, Before: d.Bytes, After: after}}); err != nil {
 		if errors.Is(err, store.ErrConflict) {
 			return nil, ErrConflict
 		}
@@ -101,6 +120,17 @@ var ErrNoProposal = errors.New("proposition introuvable")
 // or, if end > start, every proposal inside [start, end). It is the author's
 // only (D-14). It returns one edit of src.
 func DecideRange(src []byte, start, end int, decision string) (patch.Edit, error) {
+	return DecideVia(src, start, end, decision, "")
+}
+
+// DecideVia restricts the existing batch decision to one signature.
+func DecideVia(src []byte, start, end int, decision, via string) (patch.Edit, error) {
+	allowed := map[int]bool{}
+	for _, a := range review.Read(src).Annotations {
+		if via == "" || a.Via == via {
+			allowed[a.Span.Start] = true
+		}
+	}
 	op := map[string]func([]byte, []critic.Mark, critic.Annotation) (patch.Edit, error){
 		Accept: patch.Accept, Reject: patch.Reject,
 	}[decision]
@@ -110,7 +140,7 @@ func DecideRange(src []byte, start, end int, decision string) (patch.Edit, error
 	marks, _ := critic.Parse(src)
 	var targets []critic.Annotation
 	for _, a := range critic.Group(marks) {
-		if !isProposal(marks[a.Main].Kind) {
+		if !allowed[a.Span.Start] || !isProposal(marks[a.Main].Kind) {
 			continue
 		}
 		if (end > start && a.Span.Start >= start && a.Span.End <= end) || a.Span.Start == start {
@@ -129,7 +159,7 @@ func DecideRange(src []byte, start, end int, decision string) (patch.Edit, error
 	}
 	for _, a := range append([]critic.Annotation(nil), targets...) {
 		for _, p := range links[a.Span.Start].Partners {
-			if !chosen[p] {
+			if !chosen[p] && allowed[p] {
 				chosen[p] = true
 				for _, b := range critic.Group(marks) {
 					if b.Span.Start == p {

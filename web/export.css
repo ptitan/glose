@@ -1,7 +1,7 @@
 /* Export to PDF and printing (D-55). Paper is laid out here, not in style.css. */
 
 /* ---------- The panel, on screen ---------- */
-#export { position: absolute; top: calc(100% + 8px); left: 0; z-index: 40; width: min(300px, calc(100vw - 24px)); padding: var(--esp-3); display: flex; flex-direction: column; gap: var(--esp-3);
+#export { position: absolute; top: calc(100% + 8px); right: 0; z-index: 40; width: min(300px, calc(100vw - 24px)); padding: var(--esp-3); display: flex; flex-direction: column; gap: var(--esp-3);
   background: var(--carte); border: 1px solid var(--filet); border-radius: var(--rayon-panneau); box-shadow: var(--ombre-forte); font-size: var(--texte-sm); color: var(--encre); }
 #export[hidden] { display: none; }
 #export h2 { margin: 0; font-size: var(--texte-md); }

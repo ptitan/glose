@@ -248,3 +248,29 @@ func TestAgentToolsAndTry(t *testing.T) {
 		t.Fatal("manuscrit modifié")
 	}
 }
+
+func TestHashesCarryProgressWithoutJournalChange(t *testing.T) {
+	s, dir := newServer(t, map[string]string{"a.md": "\xef\xbb\xbfTexte.\r\n"})
+	if _, err := s.N.Handoff("author", ""); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(filepath.Join(s.P.State(), "journal.jsonl"))
+	if err := navette.Progress(s.P.State(), "Sol", 2, "Je vérifie les références."); err != nil {
+		t.Fatal(err)
+	}
+	w := do(t, s, "GET", "/api/hashes", nil)
+	var out struct {
+		Agent *navette.AgentState `json:"agent"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if w.Code != 200 || out.Agent == nil || out.Agent.Progress != "Je vérifie les références." || out.Agent.ProgressAt == "" {
+		t.Fatal(w.Code, w.Body)
+	}
+	after, _ := os.ReadFile(filepath.Join(s.P.State(), "journal.jsonl"))
+	text, _ := os.ReadFile(filepath.Join(dir, "a.md"))
+	if string(before) != string(after) || string(text) != "\xef\xbb\xbfTexte.\r\n" {
+		t.Fatal("octets modifiés")
+	}
+}

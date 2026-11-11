@@ -22,13 +22,15 @@ import (
 // nothing is decided from it, it may be lost without harm, and the last
 // writer wins. A file that cannot be read stands for nobody.
 type Presence struct {
-	Name     string `json:"name"`
-	PID      int    `json:"pid,omitempty"`      // set when Glose launched the agent (P10.5)
-	Since    string `json:"since"`              // first sign of this name
-	Seen     string `json:"seen"`               // last sign
-	Activity string `json:"activity"`           // wait, read, write, done, joined
-	Turn     int    `json:"turn"`               // turn of the journal at the last sign
-	Launched bool   `json:"launched,omitempty"` // launched by Glose (P10.5)
+	Progress   string `json:"progress,omitempty"`
+	ProgressAt string `json:"progressAt,omitempty"`
+	Name       string `json:"name"`
+	PID        int    `json:"pid,omitempty"`      // set when Glose launched the agent (P10.5)
+	Since      string `json:"since"`              // first sign of this name
+	Seen       string `json:"seen"`               // last sign
+	Activity   string `json:"activity"`           // wait, read, write, done, joined
+	Turn       int    `json:"turn"`               // turn of the journal at the last sign
+	Launched   bool   `json:"launched,omitempty"` // launched by Glose (P10.5)
 	// Link is the code of « glose join » that bound this agent (P10.2):
 	// the panel « Lier un agent » says « lié » only for its own code.
 	Link string `json:"link,omitempty"`
@@ -115,21 +117,21 @@ func ReadPresence(dir string) *Presence {
 // process number. Errors are returned but the callers ignore them: a lost
 // sign of life never stops a command.
 func Touch(dir, name, activity string, turn int) error {
-	return touch(dir, name, activity, turn, "", "", "")
+	return touch(dir, name, activity, turn, "", "", "", nil)
 }
 
 // TouchJoined records that the agent name was bound by the code link
 // (glose join), with its model and where it comes from (P10.11), if known:
 // in one write.
 func TouchJoined(dir, name string, turn int, link, model, source string) error {
-	return touch(dir, name, ActJoined, turn, normalCode(link), model, source)
+	return touch(dir, name, ActJoined, turn, normalCode(link), model, source, nil)
 }
 
 // TouchBound renews the sign of a bound session with its binding and its
 // model (audit of P10.12): a presence replaced meanwhile (an agent launched
 // by Glose) gets them back as soon as it is free.
 func TouchBound(dir, name, activity string, turn int, link, model, source string) error {
-	return touch(dir, name, activity, turn, normalCode(link), model, source)
+	return touch(dir, name, activity, turn, normalCode(link), model, source, nil)
 }
 
 // lockPresence serialises the reading and writing of the presence, across
@@ -203,7 +205,7 @@ func LaunchedAgent(dir string) *Presence {
 	return p
 }
 
-func touch(dir, name, activity string, turn int, link, model, source string) error {
+func touch(dir, name, activity string, turn int, link, model, source string, progress *string) error {
 	if err := CheckAgentName(name); err != nil {
 		return err
 	}
@@ -220,12 +222,18 @@ func touch(dir, name, activity string, turn int, link, model, source string) err
 	}
 	if old != nil && old.Name == name {
 		p.Since, p.PID, p.Launched, p.Identity, p.Deadline = old.Since, old.PID, old.Launched, old.Identity, old.Deadline
+		if old.Turn == turn && activity != ActDone && activity != ActWait {
+			p.Progress, p.ProgressAt = old.Progress, old.ProgressAt
+		}
 		if model == "" {
 			p.Model, p.ModelSource = old.Model, old.ModelSource
 		}
 		if link == "" {
 			p.Link = old.Link
 		}
+	}
+	if progress != nil {
+		p.Progress, p.ProgressAt = *progress, now
 	}
 	return writePresence(dir, p)
 }
@@ -244,9 +252,11 @@ func writePresence(dir string, p Presence) error {
 
 // AgentState is what the interface shows of the agent (State.Agent).
 type AgentState struct {
-	Name     string `json:"name"`
-	Activity string `json:"activity"`
-	Seen     string `json:"seen"`
+	Progress   string `json:"progress,omitempty"`
+	ProgressAt string `json:"progressAt,omitempty"`
+	Name       string `json:"name"`
+	Activity   string `json:"activity"`
+	Seen       string `json:"seen"`
 	// Fresh: a recent sign (see FreshWaiting and FreshWorking).
 	Fresh bool `json:"fresh"`
 	// Taken: during the agent's turn, a sign after the handover: the agent
@@ -285,6 +295,13 @@ func agentState(p *Presence, hand, since string, now time.Time) *AgentState {
 	}
 	age := now.Sub(seen)
 	a.Fresh = age < limit && age > -time.Minute
+	if a.Taken && a.Fresh {
+		at, progressErr := time.Parse(time.RFC3339Nano, p.ProgressAt)
+		handed, handErr := time.Parse(time.RFC3339Nano, since)
+		if progressErr == nil && handErr == nil && !at.Before(handed) {
+			a.Progress, a.ProgressAt = p.Progress, p.ProgressAt
+		}
+	}
 	a.Listening = a.Fresh && (p.Activity == ActWait || p.Activity == ActJoined)
 	return a
 }
@@ -293,4 +310,25 @@ func agentState(p *Presence, hand, since string, now time.Time) *AgentState {
 // the hand and the time of the last handover.
 func (n *Navette) Agent(hand, since string) *AgentState {
 	return agentState(ReadPresence(n.P.State()), hand, since, time.Now())
+}
+
+// CheckProgress accepts one printable sentence, up to 120 Unicode characters.
+func CheckProgress(text string) error {
+	if text == "" || strings.TrimSpace(text) != text || !utf8.ValidString(text) || utf8.RuneCountInString(text) > 120 {
+		return fmt.Errorf("avancement : 1 à 120 caractères imprimables sur une ligne")
+	}
+	for _, r := range text {
+		if !unicode.IsPrint(r) {
+			return fmt.Errorf("avancement : 1 à 120 caractères imprimables sur une ligne")
+		}
+	}
+	return nil
+}
+
+// Progress only updates the non-normative presence, through store.
+func Progress(dir, name string, turn int, text string) error {
+	if err := CheckProgress(text); err != nil {
+		return err
+	}
+	return touch(dir, name, ActRead, turn, "", "", "", &text)
 }

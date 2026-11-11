@@ -59,7 +59,7 @@
     $('ra-statut').textContent = msg;
     $('ra-statut').className = classe || '';
   }
-  function marquer() { modifie = true; statut('Modifications non enregistrées.', 'attente'); }
+  function marquer() { modifie = true; statut('Les modifications attendent votre enregistrement.', 'attente'); }
 
   function detectes() {
     const ul = $('ra-detectes');
@@ -153,12 +153,187 @@
     } else if (rien) rien.remove();
   }
 
+  // P20 (docs/maquettes/p20/consignes.html): help in a bubble, behind an (i)
+  // button; shown on hover and on focus, read by screen readers.
+  let numero = 0;
+  function aide(texte) {
+    const zone = el('span', 'ra-aide'), id = 'ra-bulle-' + (++numero);
+    const bouton = el('button', 'ra-info'); bouton.type = 'button'; bouton.setAttribute('aria-label', 'Aide');
+    bouton.setAttribute('aria-describedby', id); bouton.append(icone('info'));
+    const bulle = el('span', 'ra-bulle', texte); bulle.id = id; bulle.setAttribute('role', 'tooltip');
+    bouton.addEventListener('keydown', (e) => { if (e.key === 'Escape') bouton.blur(); });
+    zone.append(bouton, bulle);
+    return zone;
+  }
+  const changer = (n) => n.dispatchEvent(new Event('change', { bubbles: true }));
+
+  // Reused by task editors. Permissions are declarative, never arbitrary flags.
+  // Switches for yes or no, segments for a choice among three (P20).
+  function acces(zone, valeur = {}) {
+    zone.textContent = '';
+    const lus = {};
+    const interrupteur = (cle, titre, sous) => {
+      const ligne = el('div', 'ra-option'), texte = el('div'), id = 'ra-o-' + (++numero);
+      const nom = el('span', 'ra-option-nom', titre); nom.id = id; texte.append(nom);
+      if (sous) texte.append(el('small', 'aide', sous));
+      const b = el('button', 'ra-interrupteur'); b.type = 'button'; b.setAttribute('role', 'switch'); b.setAttribute('aria-labelledby', id);
+      b.append(el('span'));
+      const poser = (oui) => b.setAttribute('aria-checked', String(oui));
+      poser(!!valeur[cle]);
+      b.addEventListener('click', () => { poser(b.getAttribute('aria-checked') !== 'true'); changer(b); });
+      ligne.append(texte, b); zone.append(ligne);
+      lus[cle] = () => b.getAttribute('aria-checked') === 'true';
+      return b;
+    };
+    const segments = (cle, titre, valeurs) => {
+      const champ = el('div', 'ra-champ'), id = 'ra-s-' + (++numero);
+      const nom = el('div', 'ra-etiquette'); nom.append(el('span', '', titre)); nom.firstChild.id = id;
+      const groupe = el('div', 'ra-segments'); groupe.setAttribute('role', 'group'); groupe.setAttribute('aria-labelledby', id);
+      let courant = valeur[cle] || valeurs[0][0];
+      for (const [v, texte] of valeurs) {
+        const b = el('button', '', texte); b.type = 'button'; b.dataset.valeur = v;
+        b.addEventListener('click', () => { courant = v; poser(); changer(b); });
+        groupe.append(b);
+      }
+      const poser = () => { for (const b of groupe.children) b.setAttribute('aria-pressed', String(b.dataset.valeur === courant)); };
+      poser();
+      champ.append(nom, groupe); zone.append(champ);
+      lus[cle] = () => courant;
+      return groupe;
+    };
+    const texte = (cle, titre, type, valeurs, aideTexte, placeholder) => {
+      const champ = el('div', 'ra-champ'), id = 'ra-t-' + (++numero);
+      const nom = el('div', 'ra-etiquette'), label = el('label', '', titre); label.htmlFor = id; nom.append(label, aide(aideTexte));
+      const input = el(type); input.id = id; input.value = valeurs; if (placeholder) input.placeholder = placeholder;
+      champ.append(nom, input); zone.append(champ);
+      return { champ, input };
+    };
+    interrupteur('web', 'Recherche et lecture sur le Web');
+    interrupteur('subagents', 'Sous-agents');
+    segments('scripts', 'Scripts', [['none', 'Aucun'], ['python', 'Python'], ['shell', 'Tout le shell']]);
+    const dossiersExt = segments('externalDirs', 'Dossiers externes', [['none', 'Aucun'], ['list', 'Dossiers choisis'], ['all', 'Tous']]);
+    const dossiers = texte('dirs', 'Dossiers choisis', 'textarea', (valeur.dirs || []).join('\n'), 'Un dossier existant par ligne ; un chemin relatif part du dossier du projet.');
+    const ecriture = interrupteur('externalWrite', 'Écriture extérieure', 'Seulement dans les dossiers explicitement choisis.');
+    const mcp = texte('mcp', 'Outils MCP', 'input', (valeur.mcp || []).join(', '), 'Noms de serveurs MCP, séparés par des virgules, ajoutés aux outils requis ; leur configuration doit déjà exister chez l’agent.', 'Outils requis par le texte');
+    // The list of folders matters only when folders are chosen, or written.
+    const montrer = () => { dossiers.champ.hidden = lus.externalDirs() !== 'list' && !lus.externalWrite(); };
+    dossiersExt.addEventListener('click', montrer); ecriture.addEventListener('click', montrer); montrer();
+    zone.addEventListener('input', marquer); zone.addEventListener('change', marquer);
+    const liste = (s, sep) => s.split(sep).map((x) => x.trim()).filter(Boolean);
+    return () => ({ externalDirs: lus.externalDirs(), scripts: lus.scripts(),
+      externalWrite: lus.externalWrite(), web: lus.web(), subagents: lus.subagents(),
+      dirs: liste(dossiers.input.value, '\n'), mcp: liste(mcp.input.value, /[,\n]/) });
+  }
+
+  // Icons offered for a task, with a name (P20); the current one is kept
+  // even if it is not in this list.
+  const ICONES = [['pen-line', 'Plume'], ['pencil', 'Crayon'], ['wand-sparkles', 'Réécriture'], ['spell-check', 'Orthographe'],
+    ['languages', 'Langues'], ['scale', 'Droit'], ['book-check', 'Relecture'], ['search-check', 'Vérification'],
+    ['pen-tool', 'Stylo'], ['file-pen', 'Fichier annoté'], ['list-checks', 'Liste de contrôle'], ['sparkles', 'Idées']];
+  const NOM_ICONE = Object.fromEntries(ICONES);
+  const AGENTS = { claude: 'Claude Code', codex: 'Codex', opencode: 'OpenCode' };
+  const nomAgent = (court) => {
+    const a = etat.config.aliases.find((x) => x.name === (court || etat.config.default));
+    if (!a) return court || 'Agent par défaut';
+    return a.name + ' · ' + (AGENTS[a.agent] || a.agent);
+  };
+
+  function consigne(t = {}) {
+    const bloc = el('details', 'ra-consigne'); bloc.open = !t.id;
+    const entete = el('summary'); bloc.append(entete);
+    const formulaire = el('div', 'ra-formulaire'); bloc.append(formulaire);
+    const options = el('details', 'ra-options');
+    const titreOptions = el('summary'); titreOptions.append(icone('a-chevron'), el('span', '', 'Options'), el('span', 'ra-tag', 'Portée, accès et limites'));
+    options.append(titreOptions);
+    const champs = {};
+    const champ = (cle, titre, type = 'input', valeur = '', texte = '', parent = formulaire) => {
+      const zone = el('div', 'ra-champ'), id = 'ra-c-' + (++numero);
+      const tete = el('div', 'ra-etiquette'), label = el('label', '', titre); label.htmlFor = id;
+      tete.append(label); if (texte) tete.append(aide(texte));
+      const input = el(type); input.id = id;
+      input.value = t[cle] === undefined ? valeur : t[cle]; input.dataset.taskField = cle;
+      zone.append(tete, input); parent.append(zone); champs[cle] = input; return input;
+    };
+    const deux = el('div', 'ra-deux'); formulaire.append(deux);
+    const nom = champ('name', 'Nom', 'input', '', 'Nom affiché sur le bouton de la barre et dans le panneau de remise.', deux);
+    // Icon: a summary that shows the choice, a grid of named icons.
+    const zoneIcone = el('div', 'ra-champ'), teteIcone = el('div', 'ra-etiquette');
+    teteIcone.append(el('span', '', 'Icône'), aide('Choisissez une icône dans la liste ; aucune saisie libre.'));
+    const image = el('details', 'ra-choix-icone'), choixIcone = el('summary'); image.append(choixIcone);
+    const liste = el('div', 'ra-icones'); image.append(liste);
+    zoneIcone.append(teteIcone, image); deux.append(zoneIcone);
+    let icon = t.icon || 'pen-line';
+    const proposees = ICONES.filter(([v]) => (etat.taskIcons || []).includes(v));
+    if (!NOM_ICONE[icon]) proposees.push([icon, icon]);
+    const maj = () => {
+      const libelle = NOM_ICONE[icon] || icon;
+      choixIcone.replaceChildren(icone(icon), el('span', '', libelle), icone('menu-capsule'));
+      for (const b of liste.children) b.setAttribute('aria-pressed', String(b.dataset.taskIcon === icon));
+      const tuile = el('span', 'ra-tuile'); tuile.append(icone(icon));
+      entete.replaceChildren(tuile, el('strong', '', nom.value || 'Nouvelle consigne'), el('span', 'ra-tag', nomAgent(champs.agent?.value)), icone('a-chevron'));
+    };
+    for (const [valeur, libelle] of proposees) {
+      const bouton = el('button', 'ra-icone'); bouton.type = 'button'; bouton.dataset.taskIcon = valeur;
+      bouton.append(icone(valeur), el('span', '', libelle));
+      bouton.addEventListener('click', () => { icon = valeur; image.open = false; maj(); marquer(); choixIcone.focus(); }); liste.append(bouton);
+    }
+    champ('prompt', 'Consigne', 'textarea', '', 'Texte remis à l’agent : décrivez le travail attendu.');
+    const agent = champ('agent', 'Agent', 'select', '', 'Nom court configuré plus haut ; vide : agent du texte, sinon agent par défaut.');
+    for (const valeur of ['', ...etat.config.aliases.map(a => a.name)]) { const o = el('option', '', valeur ? nomAgent(valeur) : 'Agent du texte, sinon par défaut'); o.value = valeur; agent.append(o); }
+    if (t.agent && !etat.config.aliases.some(a => a.name === t.agent)) { const o = el('option','',t.agent + ' (inconnu)'); o.value = t.agent; agent.append(o); }
+    agent.value = t.agent || '';
+    nom.addEventListener('input', maj); agent.addEventListener('change', maj);
+    formulaire.append(options);
+    const corpsOptions = el('div', 'ra-options-corps'); options.append(corpsOptions);
+    const deuxOptions = el('div', 'ra-deux'); corpsOptions.append(deuxOptions);
+    for (const [cle,titre,valeurs,defaut,texte] of [
+      ['scope','Portée',[['file','Fichier affiché'],['files','Fichiers choisis'],['project','Projet entier']],'file','Fichiers confiés à l’agent, choisis au lancement.'],
+      ['whenAnnotations','Annotations en cours',[['block','Refuser le lancement'],['process','Les traiter aussi']],'block','Refuser seulement si les fichiers choisis ont des annotations actives, ou demander de les traiter aussi.']]) {
+      const select = champ(cle,titre,'select','',texte,deuxOptions);
+      for (const [v,texte] of valeurs) { const o = el('option','',texte); o.value = v; select.append(o); } select.value = t[cle] || defaut;
+    }
+    const place = el('input'); place.type = 'checkbox'; place.dataset.taskField = 'bar'; place.checked = (t.place || []).includes('bar');
+    const label = el('label', 'case ra-case'); label.append(place,document.createTextNode('Bouton dans la barre des vues'));
+    const lignePlace = el('div', 'ra-etiquette'); lignePlace.append(label, aide('Ajoute un raccourci à droite des vues. La consigne figure toujours dans le panneau de remise.'));
+    corpsOptions.append(lignePlace);
+    const deuxAutres = el('div', 'ra-deux'); corpsOptions.append(deuxAutres);
+    champ('workdir', 'Dossier de lancement', 'input', '', 'Vide : racine du projet ; les consignes de ce dossier seront lues.', deuxAutres);
+    const max = champ('maxMinutes', 'Durée maximale en minutes', 'input', '', 'De 1 à 240 ; vide : réglage général.', deuxAutres); max.value = t.maxMinutes || ''; max.type = 'number'; max.min = 1; max.max = 240;
+    champ('description', 'Description', 'input', '', 'Rappel facultatif du but de cette consigne.', corpsOptions);
+    const zone = el('div', 'ra-acces'); corpsOptions.append(el('h3','','Accès supplémentaires'),el('p','aide','Ces accès élargissent les réglages généraux ; les limites de l’agent sont rappelées au lancement.'),zone); const lire = acces(zone,t.access);
+    maj();
+    // Freeze the generated identifier after the first save; never expose it as input.
+    let identifiant = t.id || '';
+    const lireTache = () => {
+      const q = {}; for (const [k,v] of Object.entries(champs)) q[k] = v.value;
+      if (!identifiant) {
+        const base = (q.name.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'consigne').slice(0,24);
+        const pris = new Set([...(etat.config.tasks || []).map(t => t.id), ...[...$('ra-consignes').children].filter(b => b !== bloc).map(b => b.taskID || '')]);
+        identifiant = base; let n = 2; while (pris.has(identifiant)) identifiant = base + '-' + n++;
+      }
+      bloc.taskID = identifiant; q.id = identifiant; q.icon = icon; q.maxMinutes = Number(q.maxMinutes) || 0;
+      q.place = place.checked ? ['bar','handover'] : ['handover']; q.access = lire(); return q;
+    };
+    bloc.taskID = identifiant; bloc.lireTache = lireTache;
+    const actions = el('div', 'ra-consigne-actions');
+    const essayer = el('button','','Essayer (tour à blanc)'); essayer.type = 'button';
+    essayer.addEventListener('click', () => { const q = lireTache(); const a = etat.config.aliases.find(a => a.name === (q.agent || etat.config.default)); if (a) essai({...a,task:q}); else erreur('Enregistrez un agent avant cet essai.'); });
+    const retirer = el('button','','Retirer'); retirer.type = 'button'; retirer.addEventListener('click', () => { bloc.remove(); marquer(); });
+    actions.append(essayer,retirer); corpsOptions.append(actions);
+    bloc.addEventListener('input',marquer); bloc.addEventListener('change',marquer);
+    return bloc;
+  }
+  let lireAcces = () => ({});
   function afficher() {
     detectes();
+    lireAcces = acces($('ra-acces'), etat.config.access);
+    $('ra-limites').textContent = Object.values(etat.accessWarnings || {}).flat().join(' ');
+
     const zone = $('ra-alias');
     zone.textContent = '';
     for (const a of etat.config.aliases) zone.append(ligne(a, a.name === etat.config.default));
     vide();
+    $('ra-consignes').replaceChildren(...(etat.config.tasks || []).map(consigne));
     const p = etat.project;
     $('ra-projet').hidden = !p;
     if (p) {
@@ -178,7 +353,7 @@
   // During a request, the form is frozen: its response cannot
   // erase input entered in the meantime.
   function occupe(oui) {
-    for (const c of document.querySelectorAll('.ra input, .ra select, .ra button')) {
+    for (const c of document.querySelectorAll('.ra input, .ra select, .ra button, .ra textarea')) {
       if (oui) { c.dataset.raAvant = c.disabled ? '1' : ''; c.disabled = true; } else { c.disabled = c.dataset.raAvant === '1'; delete c.dataset.raAvant; }
     }
   }
@@ -191,7 +366,7 @@
       aliases.push(a);
       if (d.querySelector('input[type=radio]').checked) def = a.name;
     }
-    return { version: 1, default: def, aliases };
+    return { ...etat.config, version: 1, default: def, aliases, tasks: [...$('ra-consignes').children].map(b => b.lireTache()), access: lireAcces() };
   }
 
   async function enregistrer() {
@@ -282,6 +457,7 @@
     vide(); marquer();
     d.querySelector('.ra-nom').focus();
   });
+  $('ra-ajouter-consigne').addEventListener('click', () => { if (!etat) return; const b = consigne(); $('ra-consignes').append(b); marquer(); b.querySelector('input').focus(); });
   $('ra-enregistrer').addEventListener('click', enregistrer);
   $('ra-detecter').addEventListener('click', detecter);
   $('ra-verifier').addEventListener('click', verifier);

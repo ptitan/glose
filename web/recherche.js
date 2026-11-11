@@ -23,6 +23,7 @@ window.GloseRecherche = (() => {
     let retour = false;
     function replier(rendreFocus) {
       generation++; clearTimeout(timer);
+      if (!rendreFocus && !ancre.contains(document.activeElement)) document.body.classList.remove('recherche-ouverte');
       d.hidden = true;
       input.setAttribute('aria-expanded', 'false');
       if (rendreFocus) { retour = true; input.focus(); retour = false; }
@@ -74,7 +75,15 @@ window.GloseRecherche = (() => {
     casse.addEventListener('change', chercher);
     // Clicking elsewhere collapses the list.
     document.addEventListener('pointerdown', (e) => { if (!d.hidden && !ancre.contains(e.target)) replier(false); });
-    function montrer() { deplier(); input.focus(); input.select(); chercher(); }
+    // P20: the field stands in for the "Rechercher" button while in use.
+    function montrer() { document.body.classList.add('recherche-ouverte'); deplier(); input.focus(); input.select(); chercher(); }
+    ancre.addEventListener('focusout', (e) => {
+      if (!ancre.contains(e.relatedTarget) && d.hidden) document.body.classList.remove('recherche-ouverte');
+    });
+    input.addEventListener('keydown', (e) => {
+      // Before the handler above (capture): a first Escape closes the list, a second the field.
+      if (e.key === 'Escape' && d.hidden) { document.body.classList.remove('recherche-ouverte'); document.getElementById('ouvrir-recherche').focus(); }
+    }, true);
     return { montrer, replier };
   }
   return { creer };
