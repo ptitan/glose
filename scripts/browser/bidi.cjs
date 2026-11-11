@@ -7,7 +7,7 @@ const { spawn, execFileSync } = require('node:child_process');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const os = require('node:os');
-const { until, openSocket, windowsEnv, wslPath } = require('./cdp.cjs');
+const { until, openSocket, windowsEnv, wslPath, stopWindowsBrowser, stopOnExit } = require('./cdp.cjs');
 
 const isWSL = () => process.platform === 'linux' && /microsoft/i.test(os.release());
 
@@ -80,6 +80,10 @@ async function launchFirefox(tempRoot) {
     await fs.rm(profile, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 })
       .catch((err) => console.error(`Profil temporaire conservé : ${profile} (${err.message})`));
   };
+  const kill = () => { child.kill(); if (windowsFromWSL) stopWindowsBrowser(profileArgument); };
+  // On an interrupted run, the profile too (synchronous: « exit » waits for
+  // nothing); Windows releases its files a little after the browser.
+  const forget = stopOnExit(() => { kill(); require('node:fs').rmSync(profile, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 }); });
   let bidi;
   try {
     const endpoint = await until('démarrage de Firefox isolé', () => {
@@ -98,12 +102,14 @@ async function launchFirefox(tempRoot) {
         // browser.close ends the session and quits Firefox; the WSL interop
         // process follows it.
         try { await bidi.send('browser.close'); } catch (_) {} finally { ws.close(); }
-        await until('arrêt du navigateur de test', () => child.exitCode !== null || child.signalCode !== null, 10000).catch(() => child.kill());
+        await until('arrêt du navigateur de test', () => child.exitCode !== null || child.signalCode !== null, 10000).catch(kill);
+        if (windowsFromWSL) stopWindowsBrowser(profileArgument);
+        forget();
         await removeProfile();
       },
     };
   } catch (err) {
-    child.kill();
+    kill(); forget();
     await removeProfile();
     throw new Error(`${err.message}\n${log}`);
   }

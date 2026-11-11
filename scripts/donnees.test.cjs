@@ -265,3 +265,24 @@ test("thèmes : chacun complet, et lisible pour un texte long", () => {
   assert.ok(code.includes("Glose Default (clair)") && code.includes("Glose Default (sombre)"));
 });
 
+
+test('discussionsTrouvees : en cours et closes, casse, extrait, plafond', () => {
+  const { discussionsTrouvees } = globalThis.GloseDonnees;
+  const actives = [
+    { file: 0, text: 'mot', messages: [{ text: 'Pourquoi écarter la Formulation ici ?' }] },
+    { file: 0, text: 'autre', new: 'texte proposé', messages: [] },
+  ];
+  const closes = [{ c: { file: 'a.md', text: 'ancien', new: 'nouveau', messages: [{ text: 'Rejeté : la formulation était juste.' }] }, op: { time: 't' } }];
+  let t = discussionsTrouvees('formulation', false, actives, closes);
+  assert.equal(t.total, 2);
+  assert.equal(t.actives.length, 1); assert.equal(t.closes.length, 1);
+  assert.equal(t.actives[0].texte, 'Formulation');
+  assert.match(t.actives[0].avant, /écarter la $/);
+  t = discussionsTrouvees('formulation', true, actives, closes);
+  assert.equal(t.total, 1, 'casse respectée');
+  assert.equal(discussionsTrouvees('proposé', false, actives, []).actives.length, 1, 'texte proposé');
+  assert.equal(discussionsTrouvees('  ', false, actives, closes).total, 0);
+  const beaucoup = Array.from({ length: 70 }, () => ({ file: 0, text: 'x', messages: [{ text: 'formulation' }] }));
+  t = discussionsTrouvees('formulation', false, beaucoup, [], 50);
+  assert.equal(t.total, 70); assert.equal(t.actives.length, 50);
+});

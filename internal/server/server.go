@@ -197,7 +197,8 @@ func (s *Server) refresh() {
 		return
 	}
 	if sameStrings(p.Files, cur.Files) && p.Title == cur.Title && p.Filter == cur.Filter && p.CSS == cur.CSS &&
-		sameStrings(p.Resources, cur.Resources) && p.Pandoc == cur.Pandoc && p.PerFile == cur.PerFile && reflect.DeepEqual(p.Tasks, cur.Tasks) {
+		sameStrings(p.Resources, cur.Resources) && p.Pandoc == cur.Pandoc && p.PerFile == cur.PerFile && reflect.DeepEqual(p.Tasks, cur.Tasks) &&
+		reflect.DeepEqual(p.Layout, cur.Layout) {
 		// Same profile: a new renderer only if the program approved has
 		// changed (its disk cache is keyed by the program, D-64).
 		if c := s.cur(); c.R.Program() != c.R.CacheProgram() {

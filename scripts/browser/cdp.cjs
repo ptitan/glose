@@ -71,6 +71,32 @@ class CDP {
   }
 }
 
+// A browser of Windows launched from WSL: child.kill() ends only the interop
+// process, and the browser keeps running (dozens of headless Chrome found
+// after interrupted runs). Its processes are found by the test profile in
+// their command line: a directory created by the test, never a user's.
+function stopWindowsBrowser(profileArgument) {
+  if (!/[\\/]glose-(browser|firefox)-[A-Za-z0-9]+$/.test(profileArgument)) return;
+  const quoted = "'" + profileArgument.replaceAll("'", "''") + "'";
+  try {
+    execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+      `Get-CimInstance Win32_Process | Where-Object { ($_.Name -in 'chrome.exe','firefox.exe') -and $_.CommandLine -and $_.CommandLine.Contains(${quoted}) } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }`],
+      { stdio: 'ignore', timeout: 30000 });
+  } catch (_) { /* nothing more can be done */ }
+}
+
+// Stops the browser whatever ends the run: a failure, a time limit, Ctrl+C
+// (the signals end the process through « exit », whose handlers run).
+let signalsHandled = false;
+function stopOnExit(stop) {
+  if (!signalsHandled) {
+    signalsHandled = true;
+    for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143], ['SIGHUP', 129]]) process.once(signal, () => process.exit(code));
+  }
+  process.on('exit', stop);
+  return () => process.off('exit', stop);
+}
+
 async function openSocket(endpoint, windowsFromWSL) {
   if (windowsFromWSL) {
     const executable = process.env.GLOSE_WINDOWS_NODE || wslPath(windowsEnv('PROGRAMFILES') + '\\nodejs\\node.exe');
@@ -123,6 +149,10 @@ async function launchChrome(tempRoot) {
   let log = '', spawnError;
   child.stderr.on('data', (b) => { log = (log + b).slice(-12000); });
   child.on('error', (err) => { spawnError = err; });
+  const kill = () => { child.kill(); if (windowsFromWSL) stopWindowsBrowser(profileArgument); };
+  // On an interrupted run, the profile too (synchronous: « exit » waits for
+  // nothing); Windows releases its files a little after the browser.
+  const forget = stopOnExit(() => { kill(); require('node:fs').rmSync(profile, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 }); });
   let cdp;
   try {
     const endpoint = await until('démarrage de Chrome isolé', async () => {
@@ -138,13 +168,15 @@ async function launchChrome(tempRoot) {
       async page() { return Page.create(cdp); },
       async close() {
         try { await cdp.send('Browser.close'); } catch (_) {} finally { ws.close(); }
-        await until('arrêt du navigateur de test', () => child.exitCode !== null || child.signalCode !== null, 5000).catch(() => child.kill());
+        await until('arrêt du navigateur de test', () => child.exitCode !== null || child.signalCode !== null, 5000).catch(kill);
+        if (windowsFromWSL) stopWindowsBrowser(profileArgument); // what Browser.close may leave
+        forget();
         // Only a directory created by this function is removed, never a user's profile.
         await fs.rm(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch((err) => console.error(`Profil temporaire conservé : ${profile} (${err.message})`));
       },
     };
   } catch (err) {
-    child.kill();
+    kill(); forget();
     await fs.rm(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }).catch(() => {});
     throw new Error(`${err.message}\n${log}`);
   }
@@ -271,4 +303,4 @@ class Page {
 }
 
 // The relay and the WSL helpers also serve the Firefox driver (bidi.cjs).
-module.exports = { launchChrome, until, pause, openSocket, windowsEnv, wslPath };
+module.exports = { launchChrome, until, pause, openSocket, windowsEnv, wslPath, stopWindowsBrowser, stopOnExit };

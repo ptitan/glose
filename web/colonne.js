@@ -281,7 +281,7 @@ window.GloseColonne = (() => {
       const message = (c.messages || [])[0];
       const resumeA = c.kind === "substitution" ? c.text + " → " + c.new : message ? GloseDonnees.texteSimple(message.text) : c.text;
       a.append(el("span", "type", NOMS[c.kind] || c.kind), pastille(etat), el("span", "extrait", court(resumeA, 70)));
-      a.append(el("span", "meta " + (c.by === "agent" ? "agent" : "auteur"), (c.by === "agent" ? "Agent" : "Auteur") + " · t" + round + " · " + c.file));
+      a.append(el("span", "meta " + (c.by === "agent" ? "agent" : "auteur"), (c.by === "agent" ? (c.via || "Agent") : "Auteur") + " · t" + round + " · " + c.file));
       a.dataset.infobulle = "Ouvrir l'archive de cette annotation";
       a.addEventListener("click", (e) => { e.preventDefault(); GloseArchives.ouvrir(c, op); });
       bloc.append(a);

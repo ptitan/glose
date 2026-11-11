@@ -2,6 +2,7 @@ package navette
 
 import (
 	"bytes"
+	"fmt"
 	"math/rand"
 	"strings"
 	"testing"
@@ -414,5 +415,45 @@ func BenchmarkMyersWorstCase(b *testing.B) {
 		if _, err := myers(x, y); err != ErrTooManyChanges {
 			b.Fatal(err)
 		}
+	}
+}
+
+// P22.6: a paragraph rewritten beyond the word-by-word comparison becomes
+// one proposal that replaces it whole; the other paragraphs keep their fine
+// proposals. With an annotation inside it, the handover is refused as before.
+func TestTrackLongRewriteFallsBackToAWholeParagraph(t *testing.T) {
+	// The same paragraph (paired), one word in three rewritten: about 9 300
+	// word changes, beyond maxChanges.
+	var old, neu strings.Builder
+	for i := 0; i < 14000; i++ {
+		fmt.Fprintf(&old, "m%d ", i)
+		if i%3 == 0 {
+			fmt.Fprintf(&neu, "n%d ", i)
+		} else {
+			fmt.Fprintf(&neu, "m%d ", i)
+		}
+	}
+	base := []byte("Le chat dort.\n\n" + strings.TrimSpace(old.String()) + "\n")
+	cur := []byte("Le chien dort.\n\n" + strings.TrimSpace(neu.String()) + "\n")
+	out, n, problems := Track("a.md", base, cur, nil, nil)
+	if len(problems) > 0 {
+		t.Fatalf("%v", problems)
+	}
+	if n != 2 {
+		marks, _ := critic.Parse(out)
+		for _, m := range marks {
+			t.Logf("%q", string(out[m.Span.Start:min(m.Span.End, m.Span.Start+60)]))
+		}
+		t.Fatalf("%d propositions, 2 attendues", n)
+	}
+	if !bytes.Equal(projection.Project(out, projection.Current).Text, base) || !bytes.Equal(projection.Project(out, projection.Proposed).Text, cur) {
+		t.Fatal("vues")
+	}
+	if !strings.Contains(string(out), "{~~m0 m1 ") || !strings.Contains(string(out), "~>n0 m1 ") || !strings.Contains(string(out), "Le {~~chat~>chien~~}") {
+		t.Fatalf("propositions : %.200s", out)
+	}
+	annotated := []byte("Le chat dort.\n\n" + strings.Replace(strings.TrimSpace(old.String()), "m5 ", "{==m5==}{>>Note.<<} ", 1) + "\n")
+	if _, _, problems := Track("a.md", annotated, cur, nil, nil); len(problems) == 0 {
+		t.Fatal("paragraphe annoté remplacé en bloc")
 	}
 }

@@ -22,6 +22,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/ptitan/glose/internal/critic"
+	"github.com/ptitan/glose/internal/layout"
 	"github.com/ptitan/glose/internal/notes"
 	"github.com/ptitan/glose/internal/project"
 	"github.com/ptitan/glose/internal/projection"
@@ -385,6 +386,12 @@ func (r *Renderer) RenderPart(ctx context.Context, v projection.View, part strin
 	if api == nil {
 		api = []any{1, 23}
 	}
+	// The declarative layout rules (D-66), applied by Glose itself before
+	// the HTML pass and the filter.
+	parts, err := layout.Apply(r.P.Layout, parts)
+	if err != nil {
+		return nil, err
+	}
 	if r.P.PerFile {
 		html, err := r.htmlPerFile(ctx, api, v, shown, parts, g)
 		if err != nil {
@@ -464,7 +471,7 @@ func (r *Renderer) stage1File(ctx context.Context, file int, src []byte, v proje
 		return &fileResult{err: err}
 	}
 	// A very big file, without filter: rendered section by section (P6.12).
-	if r.P.Filter == "" {
+	if r.P.Filter == "" && r.P.Layout == nil {
 		if _, readable := definitions(view.Text); !readable {
 			// a definition of a form not read: rendered whole
 		} else if chunks := splitChunks(view.Text); chunks != nil {
@@ -548,11 +555,14 @@ func (r *Renderer) htmlArgs(filter string) []string {
 func (r *Renderer) htmlPerFile(ctx context.Context, api any, v projection.View, files []loaded, parts [][]byte, g gateSpec) ([]byte, error) {
 	out := make([][]byte, len(parts))
 	errs := make([]error, len(parts))
-	fh := r.filterState(g.filterHash)
+	// The HTML kept depends on the filter and on the layout rules.
+	fh := r.filterState(g.filterHash + layoutKey(r.P.Layout))
 	var wg sync.WaitGroup
 	for k := range parts {
 		i := files[k].idx
-		if files[k].res.err == nil && files[k].res.parts != nil {
+		// A file rendered by sections has its HTML made from its sections,
+		// which the layout rules do not see: rendered whole then.
+		if files[k].res.err == nil && files[k].res.parts != nil && r.P.Layout == nil {
 			wg.Add(1)
 			go func(k, i int) {
 				defer wg.Done()
@@ -944,4 +954,13 @@ func (r *Renderer) Preview(ctx context.Context, file int, md []byte) (string, er
 	}
 	html, err := r.pandoc(ctx, tree, args...)
 	return string(html), err
+}
+
+// layoutKey identifies the layout rules in the keys of the HTML kept.
+func layoutKey(r *layout.Rules) string {
+	if r == nil {
+		return ""
+	}
+	b, _ := json.Marshal(r)
+	return "\x00layout:" + store.Hash(b)
 }

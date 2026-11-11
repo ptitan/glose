@@ -3,7 +3,7 @@
 // (P9.2): results appear in a dropdown below the field.
 // Keyboard: ↓ and ↑ browse results, Enter opens, Escape closes.
 window.GloseRecherche = (() => {
-  function creer({ api, courant, ouvrir, avis }) {
+  function creer({ api, courant, ouvrir, avis, discussions, ouvrirDiscussion, ouvrirArchive }) {
     const d = document.getElementById('recherche');
     const input = document.getElementById('recherche-texte');
     const casse = document.getElementById('recherche-casse');
@@ -28,19 +28,24 @@ window.GloseRecherche = (() => {
       input.setAttribute('aria-expanded', 'false');
       if (rendreFocus) { retour = true; input.focus(); retour = false; }
     }
-    async function chercher() {
+    // P22.1: by pages of 200 (« résultats suivants »).
+    async function chercher(offset = 0) {
       clearTimeout(timer);
       const gen = ++generation, { doc, view } = courant();
-      liste.replaceChildren();
+      if (!offset) liste.replaceChildren();
+      liste.querySelector('.recherche-suite')?.remove();
       if (!doc) { statut.textContent = 'Attendez la fin du chargement du texte.'; return; }
       if (!input.value.trim()) { statut.textContent = 'Chercher dans tous les fichiers, même non affichés.'; return; }
       statut.textContent = 'Recherche…';
-      const r = await api('/api/search?q=' + encodeURIComponent(input.value) + '&case=' + (casse.checked ? '1' : '0') + '&view=' + view);
+      const r = await api('/api/search?q=' + encodeURIComponent(input.value) + '&case=' + (casse.checked ? '1' : '0') + '&view=' + view +
+        '&offset=' + offset);
       if (gen !== generation || d.hidden) return;
       if (!r.ok) { statut.textContent = r.data.message || 'Recherche impossible.'; return; }
       if (r.data.filesGen !== courant().doc.filesGen) { statut.textContent = 'La liste des fichiers a changé : relancez la recherche.'; return; }
+      const affiches = r.data.offset + r.data.matches.length;
       statut.textContent = (r.data.total ? r.data.total + ' résultat' + (r.data.total > 1 ? 's' : '') : 'Aucun résultat') +
-        (r.data.total > 200 ? ' (les 200 premiers sont affichés)' : '') + (r.data.problems.length ? ' · ' + r.data.problems.join(' ; ') : '');
+        (r.data.total > affiches ? ' (1 à ' + affiches + ' affichés)' : '') +
+        (r.data.problems.length ? ' · ' + r.data.problems.join(' ; ') : '');
       for (const m of r.data.matches) {
         const b = el('button', ''); b.type = 'button'; b.className = 'resultat-recherche';
         b.append(el('strong', m.path));
@@ -54,10 +59,41 @@ window.GloseRecherche = (() => {
         });
         liste.append(b);
       }
+      if (r.data.next) {
+        const suite = el('button', Math.min(200, r.data.total - affiches) + ' résultats suivants');
+        suite.type = 'button'; suite.className = 'recherche-suite';
+        suite.addEventListener('click', () => chercher(r.data.next));
+        liste.append(suite);
+      }
+      if (!offset) await chercherDiscussions(gen);
+    }
+
+    // P22.3: the discussions, in progress (a card) and closed (the journal),
+    // after the results in the text, when there are some (no option to tick).
+    async function chercherDiscussions(gen) {
+      const { annotations, closes } = await discussions();
+      if (gen !== generation || d.hidden) return;
+      const t = GloseDonnees.discussionsTrouvees(input.value, casse.checked, annotations, closes);
+      if (!t.total) return;
+      const zone = el('div', ''); zone.className = 'recherche-discussions';
+      zone.append(el('h4', 'Dans les discussions : ' + t.total + (t.total > t.actives.length + t.closes.length ? ' (les premières sont affichées)' : '')));
+      const ligne = (titre, x, action) => {
+        const b = el('button', ''); b.type = 'button'; b.className = 'resultat-recherche resultat-discussion';
+        b.append(el('strong', titre));
+        const extrait = el('span', '');
+        extrait.append(document.createTextNode(x.avant.replace(/\s+/g, ' ')), el('mark', x.texte), document.createTextNode(x.apres.replace(/\s+/g, ' ')));
+        b.append(extrait);
+        b.addEventListener('click', () => { replier(false); action(); });
+        zone.append(b);
+      };
+      const { doc } = courant();
+      for (const x of t.actives) ligne('En cours · ' + doc.files[x.a.file].path, x, () => ouvrirDiscussion(x.a));
+      for (const x of t.closes) ligne('Close · ' + x.c.file, x, () => ouvrirArchive(x.c, x.op));
+      liste.append(zone);
     }
     input.addEventListener('input', () => {
       deplier();
-      generation++; clearTimeout(timer); timer = setTimeout(chercher, 220);
+      generation++; clearTimeout(timer); timer = setTimeout(() => chercher(), 220);
     });
     input.addEventListener('focus', () => { if (!retour && input.value.trim() && d.hidden) { deplier(); chercher(); } });
     input.addEventListener('keydown', (e) => {
@@ -72,7 +108,8 @@ window.GloseRecherche = (() => {
       else if (e.key === 'ArrowDown' && i >= 0) { e.preventDefault(); (r[i + 1] || r[i]).focus(); }
       else if (e.key === 'ArrowUp' && i >= 0) { e.preventDefault(); if (i === 0) input.focus(); else r[i - 1].focus(); }
     });
-    casse.addEventListener('change', chercher);
+    casse.addEventListener('change', () => chercher());
+
     // Clicking elsewhere collapses the list.
     document.addEventListener('pointerdown', (e) => { if (!d.hidden && !ancre.contains(e.target)) replier(false); });
     // P20: the field stands in for the "Rechercher" button while in use.

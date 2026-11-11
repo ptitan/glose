@@ -46,12 +46,22 @@ profil : les fichiers de la racine, puis chaque sous-dossier, à trier.
   resources  dossiers dont les images peuvent être affichées (par défaut :
              tout le projet)
   pandoc     programme pandoc à utiliser (par défaut : pandoc)
+  layout     mise en page sans filtre Lua (D-66), appliquée par Glose :
+               "layout": {
+                 "numbers": { "within": "—", "skipItalic": true },
+                 "boxes": [ { "prefix": "À retenir", "class": "retenir" } ],
+                 "references": true
+               }
+             numbers : numérote les paragraphes de premier niveau, d'un fichier
+             à l'autre ; within : seulement sous les titres de niveau 1 qui
+             contiennent ce texte ; skipItalic : sauf un chapeau tout en
+             italique ; « {#p-nom} » en tête d'un paragraphe le nomme (ancre).
+             boxes : une citation dont les premiers mots en gras commencent
+             par prefix devient un encadré de classe class. references : un
+             lien vide [](#p-nom) affiche le numéro du paragraphe nommé
+             (« ? » s'il n'existe pas). Numéros et renvois font rendre le
+             projet d'un seul tenant. Rien à approuver : pas de code.
 
-Le serveur n'exécute le filtre et le programme pandoc du profil qu'une fois
-approuvés (D-64) : glose open, tapé dans un terminal, les approuve à la
-première ouverture du projet ; modifiés ensuite, ils attendent glose approve,
-tapé lui aussi dans un terminal. Un pandoc placé dans le projet n'est jamais
-approuvé.
   agent      ce que ce texte demande à l'agent (lot P10), par exemple :
                "agent": {
                  "alias": "Sol",
@@ -81,6 +91,12 @@ approuvé.
              d'accès : le dépôt peut être public. Une valeur invalide est
              ignorée avec un avertissement (glose doctor) et n'empêche jamais
              d'ouvrir le texte.
+
+Le serveur n'exécute le filtre et le programme pandoc du profil qu'une fois
+approuvés (D-64) : glose open, tapé dans un terminal, les approuve à la
+première ouverture du projet ; modifiés ensuite, ils attendent glose approve,
+tapé lui aussi dans un terminal. Un pandoc placé dans le projet n'est jamais
+approuvé.
 
 Les entrées de « files » et de « exclude »
 

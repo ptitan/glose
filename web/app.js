@@ -185,6 +185,9 @@
 
   async function ouvrirBrouillons() {
     if (S.envoi) return;
+    // P22.5: the passage selected in the text before opening, with the hash
+    // of its file then: a draft whose file has changed may be attached to it.
+    const choisi = (() => { const x = selectionDuTexte() && lireSelection(); return x ? { ...x, hash: S.hashes[x.f] } : null; })();
     garderBrouillon("saisie"); garderBrouillon("edition");
     if (S.doc) await charger(true);
     if (!(await brouillons.charger())) { avis("Impossible de lire les brouillons du projet.", true); return; }
@@ -241,7 +244,32 @@
           avis("Brouillon copié.");
         } catch (_) { texte.focus(); texte.select(); avis("Sélectionnez et copiez le texte du brouillon.", true); }
       });
-      actions.append(reprendre, retirer, sauver, copier); bloc.append(actions); liste.append(bloc);
+      // P22.5: a comment or a rewrite whose file has changed may be attached
+      // to the passage selected now; the panel opens with the draft, and
+      // nothing is written before « Enregistrer ».
+      const rattachable = !d.sending && f && f.hash !== d.hash && (d.kind === "comment" || (d.kind === "edit" && d.mode === "passage"));
+      const rattacher = el("button", "", "Rattacher à la sélection"); rattacher.type = "button"; rattacher.hidden = !rattachable;
+      rattacher.dataset.infobulle = choisi ? "Ouvrir ce brouillon sur le passage sélectionné : « " + court(choisi.extrait, 60) + " »"
+        : "Sélectionnez d'abord le nouveau passage dans le texte, puis rouvrez Brouillons";
+      rattacher.addEventListener("click", async () => {
+        if (S.envoi || e.active) return;
+        if (!choisi) { avis("Sélectionnez d'abord le nouveau passage dans le texte, puis rouvrez Brouillons.", true); return; }
+        if ($("saisie").open || $("edition").open) { avis("Fermez d'abord la saisie en cours : son brouillon sera conservé.", true); return; }
+        if (S.doc.state.hand === "agent") { avis("L'agent a la main : le brouillon reste conservé.", true); return; }
+        $("brouillons").close();
+        const avant = d.excerpt ? " (ancien passage : « " + court(d.excerpt, 50) + " »)" : "";
+        e.active = true;
+        if (d.kind === "comment") {
+          S.saisie = { mode: "passage", file: choisi.f, hash: choisi.hash, start: choisi.start, end: choisi.end, extrait: choisi.extrait, prefixe: "", brouillon: e };
+          ouvrirSaisie("Commenter un passage", choisi.extrait, "Brouillon rattaché à cette sélection" + avant + " : vérifiez avant d'enregistrer.", d.text);
+          return;
+        }
+        const r = await api("/api/passage?file=" + choisi.f + "&hash=" + choisi.hash + "&start=" + choisi.start + "&end=" + choisi.end);
+        if (!r.ok) { e.active = false; avis(r.data.message || "Ce passage ne peut pas être réécrit : le brouillon reste conservé.", true); return; }
+        ouvrirEdition("Suggérer une réécriture", "Brouillon rattaché à cette sélection" + avant + " : vérifiez avant d'enregistrer.",
+          { mode: "passage", file: choisi.f, hash: choisi.hash, at: r.data.start, start: r.data.start, end: r.data.end, original: r.data.text, brouillon: e }, d);
+      });
+      actions.append(reprendre, rattacher, retirer, sauver, copier); bloc.append(actions); liste.append(bloc);
     }
     $("brouillons").showModal();
   }
@@ -383,7 +411,20 @@
   const { sommaire, choisirOnglet } = GloseColonne.creer({ $, S, lireJSON, el, icone, choisirPartie, zone, court, retenirTitres, marquerSection, PROPOSITION, NOMS, md, cleAnnotation, activer, deciderTout, api, compter, bilan, rayon, heure, quand });
 
   const recherche = GloseRecherche.creer({ api, courant: () => ({ doc: S.doc, view: vueServeur(S.vue) }),
-    ouvrir: (m) => navigation.ouvrir(m, m.hash), avis });
+    ouvrir: (m) => navigation.ouvrir(m, m.hash), avis,
+    // P22.3: the annotations of the text, and those closed, read afresh.
+    discussions: async () => {
+      const r = await api("/api/log");
+      if (r.ok) S.journalTours = r.data.turns;
+      const ouvertes = new Set(S.doc.annotations.map((a) => a.id));
+      return { annotations: S.doc.annotations, closes: GloseDonnees.decisionsDuJournal(S.journalTours, ouvertes) };
+    },
+    ouvrirDiscussion: (a) => {
+      const cle = cleAnnotation(a);
+      const montrer = () => { const k = S.cartes.findIndex((x) => !x.cache && cleAnnotation(x.a) === cle); if (k >= 0) activer(k, true); };
+      if (S.doc.files[a.file] && !S.doc.files[a.file].shown) choisirPartie(S.doc.files[a.file].path, montrer); else montrer();
+    },
+    ouvrirArchive: (c, op) => GloseArchives.ouvrir(c, op) });
 
   // ---------- Loading ----------
   // Return true if the display was updated.
@@ -561,29 +602,71 @@
     S.filtreMission = e.target.value; afficher(S.doc, capturer(), -1);
   });
 
+  // P22.4: Typo on one file, or on every file shown (« tous »), one after
+  // the other, with a summary; « Tout accepter (Typo) » likewise.
+  const TOUS = "tous";
+  const fichiersTypo = () => {
+    const v = document.getElementById("typo-fichier").value;
+    return v === TOUS ? S.doc.files.filter(f => f.shown).map(f => f.index) : [Number(v)];
+  };
+  const typoEnAttente = (fichiers) => S.doc.annotations.filter(a => a.via === "Typo" && fichiers.includes(a.file) && PROPOSITION[a.kind]);
   function majTypo() {
     const choix = document.getElementById("typo-fichier"), avant = choix.value;
-    choix.replaceChildren(...S.doc.files.filter(f => f.shown).map(f => { const o = el("option", "", f.path); o.value = f.index; return o; }));
+    const montres = S.doc.files.filter(f => f.shown);
+    choix.replaceChildren(...montres.map(f => { const o = el("option", "", f.path); o.value = f.index; return o; }));
+    if (montres.length > 1) { const o = el("option", "", "Tous les fichiers affichés (" + montres.length + ")"); o.value = TOUS; choix.append(o); }
     if ([...choix.options].some(o => o.value === avant)) choix.value = avant;
     document.getElementById("typo-choix").hidden = choix.options.length < 2;
     const interdit = S.vue === "depuis" || S.doc.state?.hand === "agent";
     document.getElementById("typo-lancer").disabled = interdit || !choix.options.length;
-    document.getElementById("typo-accepter").hidden = interdit || !S.doc.annotations.some(a => a.via === "Typo" && a.file === Number(choix.value) && PROPOSITION[a.kind]);
+    document.getElementById("typo-accepter").hidden = interdit || !choix.options.length || !typoEnAttente(fichiersTypo()).length;
   }
   document.getElementById("typo-fichier").addEventListener("change", majTypo);
   document.getElementById("typo-lancer").addEventListener("click", async () => {
     if (saisieEnCours() || S.ecriture) return;
     S.ecriture = true; S.occupe++;
     try {
-      const file = Number(document.getElementById("typo-fichier").value);
-      const r = await api("/api/typo", {file, hash:S.hashes[file]});
-      avis(r.ok ? "Les corrections de Typo sont proposées dans la marge." : r.data.message, !r.ok);
+      const fichiers = fichiersTypo(), avant = typoEnAttente(fichiers).length;
+      let sans = 0;
+      const echecs = [];
+      for (const file of fichiers) {
+        const r = await api("/api/typo", {file, hash:S.hashes[file]});
+        if (r.ok) continue;
+        if (r.data.error === "unchanged") sans++;
+        else echecs.push(S.doc.files[file].path + " : " + (r.data.message || "échec"));
+      }
       await charger(true);
+      const n = typoEnAttente(fichiers).length - avant;
+      if (fichiers.length === 1 && !echecs.length) avis(n ? "Les corrections de Typo sont proposées dans la marge." : "Aucune correction typographique sûre dans ce fichier.", !n);
+      else avis("Typo : " + n + " correction" + (n > 1 ? "s" : "") + " proposée" + (n > 1 ? "s" : "") + " dans " + (fichiers.length - sans - echecs.length) +
+        " fichier" + (fichiers.length - sans - echecs.length > 1 ? "s" : "") + (sans ? ", " + sans + " sans correction sûre" : "") +
+        (echecs.length ? " ; échecs : " + echecs.join(" ; ") : "") + ".", echecs.length > 0);
     } finally { S.ecriture = false; S.occupe--; }
   });
-  document.getElementById("typo-accepter").addEventListener("click", () => {
-    const f = Number(document.getElementById("typo-fichier").value);
-    deciderTout(f, "accept", S.doc.annotations.filter(a => a.file === f && a.via === "Typo" && PROPOSITION[a.kind]).length, "Typo");
+  document.getElementById("typo-accepter").addEventListener("click", async () => {
+    const fichiers = fichiersTypo();
+    if (fichiers.length === 1) {
+      const f = fichiers[0];
+      deciderTout(f, "accept", typoEnAttente([f]).length, "Typo");
+      return;
+    }
+    if (saisieEnCours()) return;
+    if (S.ecriture) { avis("Une écriture est en cours : réessayez dans un instant."); return; }
+    const avec = fichiers.filter(f => typoEnAttente([f]).length), n = typoEnAttente(fichiers).length;
+    if (!(await boite({ titre: "Accepter (Typo) les " + n + " propositions ?", message: "Dans " + avec.length + " fichiers affichés. Chaque décision est gardée au journal ; Annuler défait un fichier à la fois.",
+      icone: "tout-accepter", ton: "succes", ok: "Accepter les " + n }))) return;
+    S.ecriture = true; S.occupe++;
+    try {
+      const echecs = [];
+      for (const file of avec) {
+        const req = { file, hash: S.hashes[file], start: 0, end: Number.MAX_SAFE_INTEGER, decision: "accept", via: "Typo", task: "" };
+        const r = await api("/api/decide", req);
+        retenirDecision(r, req);
+        if (!r.ok) echecs.push(S.doc.files[file].path + " : " + (r.data.message || "échec"));
+      }
+      avis(echecs.length ? "Acceptation incomplète : " + echecs.join(" ; ") : n + " propositions de Typo acceptées.", echecs.length > 0);
+      await charger(true);
+    } finally { S.occupe--; S.ecriture = false; }
   });
 
   let generationDepuis = 0;

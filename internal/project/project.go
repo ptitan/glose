@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/ptitan/glose/internal/agents"
+	"github.com/ptitan/glose/internal/layout"
 	"os"
 	"path"
 	"path/filepath"
@@ -44,6 +45,9 @@ type Profile struct {
 	Resources []string      `json:"resources"`
 	Pandoc    string        `json:"pandoc"`
 	Exclude   []string      `json:"exclude"`
+	// Layout are the declarative layout rules (D-66): numbered paragraphs,
+	// boxes, references, without a Lua filter.
+	Layout *layout.Rules `json:"layout"`
 	// FilterPerFile declares that the filter treats each file on its own
 	// (no numbering across files): the HTML is then made and kept file by
 	// file (P6.5). Without a filter, it always is.
@@ -92,18 +96,19 @@ func (a *AgentProfile) check() error {
 // Project is a reviewed project, with every path checked and resolved.
 type Project struct {
 	Tasks     []agents.Task
-	Root      string       // absolute path of the project directory
-	Source    string       // absolute path given to Load: the directory, or a single file
-	Title     string       // title shown in the interface
-	Files     []string     // Markdown files, relative to Root, slash-separated, in order
-	Filter    string       // absolute path of the Lua filter, or ""
-	CSS       string       // absolute path of the project stylesheet, or ""
-	Resources []string     // absolute paths of the directories whose images are served
-	Pandoc    string       // pandoc program ("pandoc" by default)
-	PerFile   bool         // HTML made file by file: no filter, or filterPerFile
-	Profiled  bool         // true if glose.json exists
-	Agent     AgentProfile // key « agent » of the profile (P10.3)
-	Meta      Meta         // key « project » of the profile, its valid values (D-51)
+	Root      string        // absolute path of the project directory
+	Source    string        // absolute path given to Load: the directory, or a single file
+	Title     string        // title shown in the interface
+	Files     []string      // Markdown files, relative to Root, slash-separated, in order
+	Filter    string        // absolute path of the Lua filter, or ""
+	CSS       string        // absolute path of the project stylesheet, or ""
+	Resources []string      // absolute paths of the directories whose images are served
+	Pandoc    string        // pandoc program ("pandoc" by default)
+	Layout    *layout.Rules // declarative layout rules (D-66), or nil
+	PerFile   bool          // HTML made file by file: no filter, or filterPerFile
+	Profiled  bool          // true if glose.json exists
+	Agent     AgentProfile  // key « agent » of the profile (P10.3)
+	Meta      Meta          // key « project » of the profile, its valid values (D-51)
 	// MetaWarnings says what was left out of the key « project ».
 	MetaWarnings []string
 	// Focus is the part of the project asked for when a path inside it was
@@ -288,7 +293,15 @@ func load(root, single string) (*Project, error) {
 		return nil, fmt.Errorf("%w dans %s", ErrNoMarkdown, root)
 	}
 	p.Files = files
-	p.PerFile = prof.Filter == "" || prof.FilterPerFile
+	if prof.Layout != nil {
+		if err := prof.Layout.Check(); err != nil {
+			return nil, fmt.Errorf("%s : %w", ProfileName, err)
+		}
+		p.Layout = prof.Layout
+	}
+	// Numbers and references go from one file to the next: the whole
+	// project in one pass, as with a filter that is not filterPerFile.
+	p.PerFile = (prof.Filter == "" || prof.FilterPerFile) && !p.Layout.Global()
 	if prof.Filter != "" {
 		abs, _, err := p.Inside(prof.Filter)
 		if err != nil {

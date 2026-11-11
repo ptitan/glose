@@ -157,13 +157,32 @@ window.GloseInterface = (() => {
     document.addEventListener("keydown", (e) => { if (e.key === "Escape") cacherBulle(); });
 
     // ---------- Utilities ----------
-    let minuterieAvis = 0;
-    function avis(msg, erreur) {
+    // Notices are stacked, each for its own time (3 s, 8 s for an error):
+    // a second notice no longer erases the first one (a refusal, then
+    // « Le texte a changé sur le disque » a moment later). Three at most;
+    // the same text again only restarts its time.
+    const avisAffiches = [];
+    function montrerAvis() {
       const el = $("avis");
-      el.textContent = msg;
-      el.className = "visible" + (erreur ? " erreur" : "");
-      clearTimeout(minuterieAvis);
-      minuterieAvis = setTimeout(() => { el.className = ""; }, erreur ? 8000 : 3000);
+      el.replaceChildren(...avisAffiches.map((a) => {
+        const ligne = document.createElement("div");
+        ligne.className = "avis-ligne" + (a.erreur ? " erreur" : "");
+        ligne.textContent = a.msg;
+        return ligne;
+      }));
+      el.className = avisAffiches.length ? "visible" + (avisAffiches.some((a) => a.erreur) ? " erreur" : "") : "";
+    }
+    function avis(msg, erreur) {
+      const deja = avisAffiches.findIndex((a) => a.msg === msg);
+      if (deja >= 0) { clearTimeout(avisAffiches[deja].minuterie); avisAffiches.splice(deja, 1); }
+      const a = { msg, erreur: !!erreur };
+      a.minuterie = setTimeout(() => {
+        const i = avisAffiches.indexOf(a);
+        if (i >= 0) { avisAffiches.splice(i, 1); montrerAvis(); }
+      }, erreur ? 8000 : 3000);
+      avisAffiches.push(a);
+      while (avisAffiches.length > 3) clearTimeout(avisAffiches.shift().minuterie);
+      montrerAvis();
     }
 
     // Persistent banner for issues that prevent work (session, rendering).

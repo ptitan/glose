@@ -1291,3 +1291,39 @@ func TestListenForIsStable(t *testing.T) {
 		t.Fatalf("port changé : %d puis %d", port, port3)
 	}
 }
+
+// P22.1: results by pages of 200.
+func TestSearchPagesAndPart(t *testing.T) {
+	a := strings.Repeat("Un mot. ", 300) + "\n"
+	b := strings.Repeat("Un mot. ", 150) + "\n"
+	s, _ := newServer(t, map[string]string{"a.md": a, "ch/b.md": b})
+	page := func(q string) (n, total, next int, paths map[string]int) {
+		t.Helper()
+		w := do(t, s, "GET", "/api/search?q=mot"+q, nil)
+		var out struct {
+			Matches []struct{ Path string }
+			Total   int
+			Next    int
+		}
+		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &out) != nil {
+			t.Fatalf("%s : %d %s", q, w.Code, w.Body)
+		}
+		paths = map[string]int{}
+		for _, m := range out.Matches {
+			paths[m.Path]++
+		}
+		return len(out.Matches), out.Total, out.Next, paths
+	}
+	if n, total, next, p := page(""); n != 200 || total != 450 || next != 200 || p["a.md"] != 200 {
+		t.Fatalf("page 1 : %d %d %d %v", n, total, next, p)
+	}
+	if n, _, next, p := page("&offset=200"); n != 200 || next != 400 || p["a.md"] != 100 || p["ch/b.md"] != 100 {
+		t.Fatalf("page 2 : %d %d %v", n, next, p)
+	}
+	if n, _, next, p := page("&offset=400"); n != 50 || next != 0 || p["ch/b.md"] != 50 {
+		t.Fatalf("page 3 : %d %d %v", n, next, p)
+	}
+	if w := do(t, s, "GET", "/api/search?q=mot&offset=-1", nil); w.Code != 400 {
+		t.Fatalf("décalage négatif : %d", w.Code)
+	}
+}

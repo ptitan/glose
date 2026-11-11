@@ -4,6 +4,9 @@
 window.GloseArchives = (() => {
   const DECISIONS = { accept: 'Acceptée', reject: 'Rejetée', resolve: 'Discussion résolue', withdraw: 'Retirée', revise: 'Version précédente', direct: 'Modification directe' };
   const QUI = { author: 'Vous', agent: "L’agent", unknown: 'Auteur inconnu' };
+  // Who wrote it: for an agent, its short name and its model when the
+  // journal keeps them (P22.2), « L'agent » for an older journal.
+  const qui = (x) => x.by === 'agent' && x.via ? x.via + (x.model ? ' (' + x.model + ')' : '') : QUI[x.by] || 'Auteur non renseigné';
   function el(tag, text, classe) {
     const n = document.createElement(tag); n.textContent = text;
     if (classe) n.className = classe;
@@ -14,7 +17,7 @@ window.GloseArchives = (() => {
     const d = el('div', '', 'archive-texte');
     d.append(el('p', 'Événement historique : une annulation ultérieure peut avoir rouvert cette annotation.', 'aide'));
     d.append(el('p', c.file + (c.id ? ' · ' + c.id : ''), 'archive-meta'));
-    d.append(el('p', (QUI[c.by] || 'Auteur non renseigné') + ' · ' + (op.time ? new Date(op.time).toLocaleString('fr-FR') : ''), 'archive-meta'));
+    d.append(el('p', qui(c) + ' · ' + (op.time ? new Date(op.time).toLocaleString('fr-FR') : ''), 'archive-meta'));
     const morceau = (titre, texte) => { d.append(el('h4', titre), el('pre', texte || '∅')); };
     const directe = c.decision === 'direct'; // D-57: imposed, never proposed
     if (c.kind === 'substitution') { morceau('Texte d’origine', c.text); morceau(directe ? 'Nouveau texte' : 'Texte proposé', c.new); }
@@ -25,7 +28,7 @@ window.GloseArchives = (() => {
       d.append(el('h4', 'Discussion'));
       for (const m of c.messages) {
         const b = el('blockquote', '');
-        b.append(el('strong', QUI[m.by] || 'Auteur non renseigné'), el('p', m.text));
+        b.append(el('strong', qui(m)), el('p', m.text));
         d.append(b);
       }
     }

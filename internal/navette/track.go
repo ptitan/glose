@@ -428,6 +428,13 @@ func (t *tracker) words(old []byte, oldAt int, neu []byte, at int) {
 		b[i].offset += at
 	}
 	steps, err := diff(a, b)
+	if errors.Is(err, ErrTooManyChanges) && !hasMarks(a) && !hasMarks(b) {
+		// P22.6: a paragraph rewritten beyond what is compared word by word
+		// (a long table, say) becomes one proposal that replaces it whole,
+		// instead of refusing the handover. Not if it holds annotations:
+		// they cannot be replaced whole without losing them.
+		steps, err = []step{{a0: 0, a1: len(a), b0: 0, b1: len(b)}}, nil
+	}
 	if err != nil {
 		t.report(at, err.Error())
 		return
@@ -1236,4 +1243,14 @@ func (n *Navette) createdSince(rel string, last *journal.Event) bool {
 	}
 	fi, err := os.Stat(abs)
 	return err == nil && fi.ModTime().After(handed.Add(-2*time.Second))
+}
+
+// hasMarks reports whether units hold a mark (an annotation).
+func hasMarks(us []unit) bool {
+	for _, u := range us {
+		if u.mark {
+			return true
+		}
+	}
+	return false
 }

@@ -144,7 +144,7 @@ func (h *History) Closed() map[string]journal.Closed {
 			// The messages of a closed thread are closed with it.
 			for _, m := range c.Messages {
 				if m.ID != "" && m.ID != c.ID {
-					out[m.ID] = journal.Closed{ID: m.ID, File: c.File, Decision: c.Decision, Kind: "message", By: m.By, Text: m.Text}
+					out[m.ID] = journal.Closed{ID: m.ID, File: c.File, Decision: c.Decision, Kind: "message", By: m.By, Via: m.Via, Model: m.Model, Text: m.Text}
 				}
 			}
 		}
@@ -483,7 +483,7 @@ func Compare(path string, before, after []byte, decision string) ([]string, []jo
 		for _, m := range ann.Replies() {
 			if m.ID != "" && !now[m.ID] {
 				closed = append(closed, journal.Closed{ID: m.ID, File: path, Decision: Withdraw, Kind: "message", By: m.By,
-					Text: string(before[m.Mark.Text.Start:m.Mark.Text.End])})
+					Via: m.Via, Model: m.Model, Text: string(before[m.Mark.Text.Start:m.Mark.Text.End])})
 			}
 		}
 	}
@@ -536,7 +536,7 @@ func amendedMessages(path string, b *review.Doc, old review.Annotation, a *revie
 	text := func(d *review.Doc, m review.Message) string { return string(d.Src[m.Mark.Text.Start:m.Mark.Text.End]) }
 	var out []journal.Closed
 	add := func(m review.Message, was string) {
-		out = append(out, journal.Closed{ID: m.ID, File: path, Decision: Revise, Kind: "message", By: m.By, Text: was})
+		out = append(out, journal.Closed{ID: m.ID, File: path, Decision: Revise, Kind: "message", By: m.By, Via: m.Via, Model: m.Model, Text: was})
 	}
 	oh, nh := len(old.Messages)-len(old.Replies()), len(now.Messages)-len(now.Replies())
 	for k := 0; k < oh && k < nh; k++ {
@@ -598,9 +598,10 @@ func sameAnnotationIn(src []byte, ann review.Annotation, a *review.Doc) bool {
 func copyOf(path string, src []byte, a review.Annotation, decision string) journal.Closed {
 	m := a.Mark
 	c := journal.Closed{ID: a.ID, File: path, Decision: decision, Kind: render.KindName(m.Kind), By: a.By, Task: a.Task,
-		Text: string(src[m.Text.Start:m.Text.End]), New: string(src[m.New.Start:m.New.End])}
+		Via: a.Via, Model: a.Model, Text: string(src[m.Text.Start:m.Text.End]), New: string(src[m.New.Start:m.New.End])}
 	for _, msg := range a.Messages {
-		c.Messages = append(c.Messages, journal.Message{ID: msg.ID, By: msg.By, Task: msg.Task, Text: string(src[msg.Mark.Text.Start:msg.Mark.Text.End])})
+		c.Messages = append(c.Messages, journal.Message{ID: msg.ID, By: msg.By, Via: msg.Via, Model: msg.Model, Task: msg.Task,
+			Text: string(src[msg.Mark.Text.Start:msg.Mark.Text.End])})
 	}
 	return c
 }

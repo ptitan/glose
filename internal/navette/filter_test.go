@@ -4,7 +4,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ptitan/glose/internal/patch"
 	"github.com/ptitan/glose/internal/projection"
+	"github.com/ptitan/glose/internal/review"
 )
 
 // D-65: the batch decision under the filter of a mission decides the
@@ -39,5 +41,30 @@ func TestDecideFilteredByMission(t *testing.T) {
 	}
 	if got := string(e.Apply(note)); strings.Contains(got, "{++") {
 		t.Fatalf("note coupée : %q", got)
+	}
+}
+
+// P22.2: once decided, a proposal of an agent keeps, in the journal, the
+// short name and the model of the agent, for itself and its messages.
+func TestDecidedCopyKeepsTheAgent(t *testing.T) {
+	src := "Un {~~mot~>terme~~}{>>glose:v1 id=aaaa by=agent via=Sol model=gpt-essai<<}{>>Plus précis.<<}" +
+		"{>>glose:v1 id=bbbb re=aaaa by=agent via=Sol model=gpt-essai<<}{>>D'accord ?<<}{>>glose:v1 id=cccc re=aaaa by=author<<}.\n"
+	w := newWorld(t, map[string]string{"a.md": src})
+	w.do("author", 0, "decide", Accept, func(s []byte, _ *review.Gen) (patch.Edit, error) {
+		return DecideRange(s, strings.Index(string(s), "{~~"), 0, Accept)
+	})
+	h, err := w.n.History()
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, ok := h.Closed()["aaaa"]
+	if !ok || c.Via != "Sol" || c.Model != "gpt-essai" {
+		t.Fatalf("annotation : %+v", c)
+	}
+	if len(c.Messages) != 2 || c.Messages[0].Via != "Sol" || c.Messages[0].Model != "gpt-essai" || c.Messages[1].Via != "" {
+		t.Fatalf("messages : %+v", c.Messages)
+	}
+	if m := h.Closed()["bbbb"]; m.Via != "Sol" || m.Model != "gpt-essai" {
+		t.Fatalf("message clos avec son fil : %+v", m)
 	}
 }

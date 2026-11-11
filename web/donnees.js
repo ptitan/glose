@@ -307,5 +307,36 @@
     });
   }
 
-  globalThis.GloseDonnees = { emphase, texteSimple, etatAnnotation, decisionsDuJournal, clesDesTitres, modeleCourt, creerEnvoiTitres, lireG, court, signature, cleAnnotation, premierApres, plageVisible, SEGMENTS, compter, rayon, bilan, heure, quand };
+  // P22.3: the discussions that contain q: the annotations of the text
+  // (passage, proposed text, messages) and those closed in the journal
+  // (decisionsDuJournal). Literal, case ignored unless sensible. At most max
+  // of each, with an excerpt around the first match.
+  function discussionsTrouvees(q, sensible, annotations, closes, max = 50) {
+    const plier = (t) => sensible ? String(t || '').normalize('NFC') : String(t || '').normalize('NFC').toLocaleLowerCase('fr');
+    const aiguille = plier(q).trim();
+    const out = { actives: [], closes: [], total: 0 };
+    if (!aiguille) return out;
+    const textes = (x) => [x.text, x.new, ...(x.messages || []).map((m) => m.text)];
+    const extrait = (x) => {
+      for (const t of textes(x)) {
+        const plie = plier(t), i = plie.indexOf(aiguille);
+        if (i >= 0) {
+          const brut = String(t).normalize('NFC');
+          return { avant: brut.slice(Math.max(0, i - 40), i), texte: brut.slice(i, i + aiguille.length), apres: brut.slice(i + aiguille.length, i + aiguille.length + 60) };
+        }
+      }
+      return null;
+    };
+    for (const a of annotations || []) {
+      const e = extrait(a);
+      if (e) { out.total++; if (out.actives.length < max) out.actives.push({ a, ...e }); }
+    }
+    for (const d of closes || []) {
+      const e = extrait(d.c);
+      if (e) { out.total++; if (out.closes.length < max) out.closes.push({ ...d, ...e }); }
+    }
+    return out;
+  }
+
+  globalThis.GloseDonnees = { discussionsTrouvees, emphase, texteSimple, etatAnnotation, decisionsDuJournal, clesDesTitres, modeleCourt, creerEnvoiTitres, lireG, court, signature, cleAnnotation, premierApres, plageVisible, SEGMENTS, compter, rayon, bilan, heure, quand };
 })();

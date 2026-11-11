@@ -80,3 +80,35 @@ test('une réduction de fenêtre garde les actions accessibles en panneau latér
   assert.ok(m.document.body.classes.has('edition-laterale'));
   assert.ok(parseFloat(m.dialogue.style.top) + parseFloat(m.dialogue.style.maxHeight) <= m.window.innerHeight);
 });
+
+// Audit 11 novembre : un avis n'efface plus le précédent ; chacun garde son
+// temps (3 s, 8 s pour une erreur), trois au plus, le même texte n'est pas
+// répété.
+test('avis empilés, chacun pour son temps', () => {
+  class Node { constructor() { this.children = []; this.className = ''; this._text = ''; this.style = {}; this.classList = { add() {}, remove() {}, toggle() {} }; }
+    setAttribute() {} append() {} addEventListener() {}
+    replaceChildren(...c) { this.children = c; }
+    get textContent() { return this.children.length ? this.children.map((c) => c.textContent).join('\n') : this._text; }
+    set textContent(t) { this._text = t; this.children = []; } }
+  const timers = []; let now = 0;
+  const context = { window: {}, document: { addEventListener() {}, createElement: () => new Node(), body: new Node() }, Event,
+    setTimeout: (fn, ms) => { const t = { fn, at: now + ms }; timers.push(t); return t; },
+    clearTimeout: (t) => { const i = timers.indexOf(t); if (i >= 0) timers.splice(i, 1); }, requestAnimationFrame() {} };
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../web/interface.js'), 'utf8'), context);
+  const el = new Node();
+  const { avis } = context.window.GloseInterface.creer({ $: () => el });
+  const advance = (ms) => { now += ms; for (const t of timers.filter((t) => t.at <= now)) { timers.splice(timers.indexOf(t), 1); t.fn(); } };
+  avis('Le texte a changé ou ne peut pas être vérifié : relancez la recherche.', true);
+  avis('Le texte a changé sur le disque : affichage mis à jour.');
+  assert.match(el.textContent, /relancez la recherche/);
+  assert.match(el.textContent, /affichage mis à jour/);
+  assert.match(el.className, /visible/); assert.match(el.className, /erreur/);
+  advance(3000);
+  assert.doesNotMatch(el.textContent, /affichage mis à jour/, 'information retirée après 3 s');
+  assert.match(el.textContent, /relancez la recherche/, 'erreur encore là');
+  advance(5000);
+  assert.equal(el.className, '');
+  for (const m of ['a', 'b', 'c', 'd', 'd']) avis(m);
+  assert.equal(el.children.length, 3);
+  assert.equal(el.textContent, 'b\nc\nd');
+});

@@ -339,3 +339,25 @@ func TestAgentProfile(t *testing.T) {
 		}
 	}
 }
+
+// D-66: layout rules are checked when the profile is read.
+func TestLayoutRulesAreChecked(t *testing.T) {
+	for profile, want := range map[string]string{
+		`{"layout":{"boxes":[{"prefix":"","class":"x"}]}}`:                    "préfixe",
+		`{"layout":{"boxes":[{"prefix":"Note","class":"Pas Bonne"}]}}`:        "classe",
+		`{"layout":{"numbers":{"within":"` + strings.Repeat("x", 41) + `"}}}`: "40 caractères",
+	} {
+		dir := t.TempDir()
+		write(t, dir, "a.md", "a")
+		write(t, dir, ProfileName, profile)
+		if _, err := Load(dir); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s : %v", profile, err)
+		}
+	}
+	dir := t.TempDir()
+	write(t, dir, "a.md", "a")
+	write(t, dir, ProfileName, `{"layout":{"boxes":[{"prefix":"Note","class":"note"}]}}`)
+	if p, err := Load(dir); err != nil || p.Layout == nil || !p.PerFile {
+		t.Fatalf("%+v %v", p, err)
+	}
+}

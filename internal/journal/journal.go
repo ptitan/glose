@@ -89,12 +89,16 @@ type FileState struct {
 
 // Closed is the copy of an annotation closed by a decision (SPEC F11).
 type Closed struct {
-	Task     string    `json:"task,omitempty"`
-	ID       string    `json:"id"`
-	File     string    `json:"file"`
-	Decision string    `json:"decision"` // accept, reject, resolve, withdraw, direct (revise: a previous version)
-	Kind     string    `json:"kind"`
-	By       string    `json:"by,omitempty"`
+	Task     string `json:"task,omitempty"`
+	ID       string `json:"id"`
+	File     string `json:"file"`
+	Decision string `json:"decision"` // accept, reject, resolve, withdraw, direct (revise: a previous version)
+	Kind     string `json:"kind"`
+	By       string `json:"by,omitempty"`
+	// Via and Model name the agent that wrote it (its short name, its
+	// model), kept once it is decided (P22.2).
+	Via      string    `json:"via,omitempty"`
+	Model    string    `json:"model,omitempty"`
 	Text     string    `json:"text"`
 	New      string    `json:"new,omitempty"`
 	Messages []Message `json:"messages,omitempty"`
@@ -105,10 +109,12 @@ type Closed struct {
 
 // Message is a message of a closed thread.
 type Message struct {
-	Task string `json:"task,omitempty"`
-	ID   string `json:"id,omitempty"`
-	By   string `json:"by,omitempty"`
-	Text string `json:"text"`
+	Task  string `json:"task,omitempty"`
+	ID    string `json:"id,omitempty"`
+	By    string `json:"by,omitempty"`
+	Via   string `json:"via,omitempty"`
+	Model string `json:"model,omitempty"`
+	Text  string `json:"text"`
 }
 
 // TurnInfo is the content of a turn event: an actor hands the text over.
