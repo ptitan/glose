@@ -1408,7 +1408,9 @@ const scenarios = [
 ];
 
 if (require.main === module) test('Glose dans un navigateur isolé', { timeout: 240000 }, async (t) => {
-  const root = await fs.mkdtemp(path.join(process.env.GLOSE_TEST_TMP || os.tmpdir(), 'glose-browser-tests-'));
+  // Resolved, as Glose names its projects: the short names of Windows
+  // (RUNNER~1) and links would otherwise make two forms of one path.
+  const root = await fs.realpath(await fs.mkdtemp(path.join(process.env.GLOSE_TEST_TMP || os.tmpdir(), 'glose-browser-tests-')));
   let browser, failed = false;
   t.after(async () => {
     if (browser) await browser.close();

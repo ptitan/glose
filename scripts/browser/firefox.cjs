@@ -94,7 +94,9 @@ const scenarios = [
 
 if (require.main === module) test('Glose dans Firefox isolé', { timeout: 180000 }, async (t) => {
   if (process.env.GLOSE_FIREFOX === '0') { t.skip('GLOSE_FIREFOX=0 : essais Firefox sautés à la demande'); return; }
-  const root = await fs.mkdtemp(path.join(process.env.GLOSE_TEST_TMP || os.tmpdir(), 'glose-firefox-tests-'));
+  // Resolved, as Glose names its projects: the short names of Windows
+  // (RUNNER~1) and links would otherwise make two forms of one path.
+  const root = await fs.realpath(await fs.mkdtemp(path.join(process.env.GLOSE_TEST_TMP || os.tmpdir(), 'glose-firefox-tests-')));
   let browser, failed = false;
   t.after(async () => {
     if (browser) await browser.close();
