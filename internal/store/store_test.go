@@ -22,6 +22,10 @@ var original = []byte("\ufeffL’été\r\nSeconde ligne\r\n")
 func setup(t *testing.T) (dir, path string) {
 	t.Helper()
 	dir = t.TempDir()
+	// As WriteIfUnchanged names it (links, short names of Windows).
+	if real, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = real
+	}
 	path = filepath.Join(dir, "texte.md")
 	if err := os.WriteFile(path, original, 0o640); err != nil {
 		t.Fatal(err)

@@ -29,7 +29,10 @@ func TestNFCTablesMatchTheGenerator(t *testing.T) {
 		t.Skipf("Python a Unicode %s, les tables %s : régénérer seulement si pandoc suit (docs/UNICODE.md)", v, nfcUnicodeVersion)
 	}
 	gen := filepath.Join("..", "..", "tools", "gen-nfc", "gen.py")
-	raw, err := exec.Command(py, "-I", gen).Output()
+	// -X utf8 and LF: under Windows, Python writes in the encoding of the
+	// console and with CRLF (-I ignores PYTHONUTF8).
+	raw, err := exec.Command(py, "-I", "-X", "utf8", gen).Output()
+	raw = bytes.ReplaceAll(raw, []byte("\r\n"), []byte("\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +43,8 @@ func TestNFCTablesMatchTheGenerator(t *testing.T) {
 	if got, _ := os.ReadFile("nfc_tables.go"); !bytes.Equal(got, tables) {
 		t.Error("nfc_tables.go diffère de la sortie du générateur : régénérer (docs/UNICODE.md)")
 	}
-	vectors, err := exec.Command(py, "-I", gen, "--vectors").Output()
+	vectors, err := exec.Command(py, "-I", "-X", "utf8", gen, "--vectors").Output()
+	vectors = bytes.ReplaceAll(vectors, []byte("\r\n"), []byte("\n"))
 	if err != nil {
 		t.Fatal(err)
 	}

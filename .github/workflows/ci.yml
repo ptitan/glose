@@ -40,6 +40,14 @@ jobs:
         run: ./scripts/check.sh
       - name: go test -race
         run: go test -race -count=1 ./...
+      - name: go test, dossier temporaire derrière un lien
+        # Comme les noms courts de Windows (RUNNER~1), un lien fait différer
+        # le chemin écrit du chemin résolu : les deux doivent désigner le
+        # même projet.
+        run: |
+          mkdir -p "$RUNNER_TEMP/reel"
+          ln -s "$RUNNER_TEMP/reel" "$RUNNER_TEMP/lien"
+          TMPDIR="$RUNNER_TEMP/lien" go test -count=1 ./...
 
   windows:
     name: Windows natif (go test)

@@ -43,6 +43,10 @@ func newServer(t *testing.T, files map[string]string) (*Server, string) {
 		t.Setenv("GLOSE_CONFIG_DIR", t.TempDir())
 	}
 	dir := t.TempDir()
+	// As the project names it (links, short names of Windows).
+	if real, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = real
+	}
 	for name, content := range files {
 		p := filepath.Join(dir, filepath.FromSlash(name))
 		os.MkdirAll(filepath.Dir(p), 0o755)

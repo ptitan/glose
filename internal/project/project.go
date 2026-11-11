@@ -342,6 +342,11 @@ func StateOf(path string) (string, error) {
 	}
 	if real, err := filepath.EvalSymlinks(abs); err == nil {
 		abs = real
+	} else if real, err := filepath.EvalSymlinks(filepath.Dir(abs)); err == nil {
+		// A file deleted: its directory is resolved all the same, so that
+		// the state is named as the server names it (links, and the short
+		// names of Windows, « RUNNER~1 » for « runneradmin »).
+		abs = filepath.Join(real, filepath.Base(abs))
 	}
 	// A file, or a path that no longer exists (a file deleted while its
 	// server runs): the state is in its directory.

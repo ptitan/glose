@@ -1,3 +1,6 @@
-# Les corpus de test sont comparés octet par octet : Git ne doit jamais
-# convertir leurs fins de ligne ni leur encodage.
+# Glose compare des octets (D-04) : Git ne convertit jamais les fins de ligne
+# ni l'encodage, sous aucun système (sous Windows, core.autocrlf passerait les
+# sources en CRLF). Les corpus de test, en particulier, sont comparés octet
+# par octet.
+* -text
 **/testdata/** -text

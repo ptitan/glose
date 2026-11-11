@@ -84,14 +84,28 @@ func InsideProject(root, pandoc string) bool {
 	if !filepath.IsAbs(p) && filepath.VolumeName(p) == "" && !strings.HasPrefix(p, "/") && !strings.HasPrefix(p, `\`) {
 		p = filepath.Join(root, p)
 	}
-	if real, err := filepath.EvalSymlinks(p); err == nil {
-		p = real
-	}
 	realRoot := root
 	if r, err := filepath.EvalSymlinks(root); err == nil {
 		realRoot = r
 	}
-	rel, err := filepath.Rel(realRoot, p)
+	// The path as written, and as resolved (links, short names of Windows),
+	// against the root as given and as resolved: inside if any says so.
+	paths := []string{p}
+	if real, err := filepath.EvalSymlinks(p); err == nil {
+		paths = append(paths, real)
+	}
+	for _, r := range []string{root, realRoot} {
+		for _, x := range paths {
+			if within(r, x) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func within(root, path string) bool {
+	rel, err := filepath.Rel(root, path)
 	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
 }
 

@@ -23,6 +23,10 @@ type world struct {
 func newWorld(t *testing.T, files map[string]string) *world {
 	t.Helper()
 	dir := t.TempDir()
+	// As the project names it (links, short names of Windows).
+	if real, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = real
+	}
 	for name, c := range files {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(c), 0o644); err != nil {
 			t.Fatal(err)
