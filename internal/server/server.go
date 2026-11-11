@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"io/fs"
 	"net"
@@ -63,6 +64,10 @@ type Server struct {
 	// Stop is closed when a client asks the server to stop.
 	Stop     chan struct{}
 	stopOnce sync.Once
+	// hashes keeps the hash of each file of the text with its size and
+	// time (P21.10): the poll of the interface does not read them all again.
+	hashMu   sync.Mutex
+	hashKept map[string]hashEntry
 	// progressMu serialises the writes of .glose/progression.json.
 	progressMu sync.Mutex
 	// undoMu guards undos: the state of each file before the last decisions
@@ -121,6 +126,9 @@ func New(p *project.Project, port int, token string) *Server {
 // (P6.4): a project reopened unchanged is not read by pandoc again.
 func newRenderer(p *project.Project) *render.Renderer {
 	r := render.New(p)
+	// The server runs the program and the filter of the profile only once
+	// the author has approved them (D-64).
+	r.Gated = true
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	r.EnableDiskCache(ctx)
@@ -185,8 +193,16 @@ func (s *Server) refreshSoon() {
 func (s *Server) refresh() {
 	cur := s.cur().P
 	p, err := project.Load(cur.Source)
-	if err != nil || (sameStrings(p.Files, cur.Files) && p.Title == cur.Title && p.Filter == cur.Filter && p.CSS == cur.CSS &&
-		sameStrings(p.Resources, cur.Resources) && p.Pandoc == cur.Pandoc && p.PerFile == cur.PerFile && reflect.DeepEqual(p.Tasks, cur.Tasks)) {
+	if err != nil {
+		return
+	}
+	if sameStrings(p.Files, cur.Files) && p.Title == cur.Title && p.Filter == cur.Filter && p.CSS == cur.CSS &&
+		sameStrings(p.Resources, cur.Resources) && p.Pandoc == cur.Pandoc && p.PerFile == cur.PerFile && reflect.DeepEqual(p.Tasks, cur.Tasks) {
+		// Same profile: a new renderer only if the program approved has
+		// changed (its disk cache is keyed by the program, D-64).
+		if c := s.cur(); c.R.Program() != c.R.CacheProgram() {
+			s.renew()
+		}
 		return
 	}
 	s.curMu.Lock()
@@ -197,6 +213,14 @@ func (s *Server) refresh() {
 	s.undoMu.Lock()
 	s.undos = nil
 	s.undoMu.Unlock()
+}
+
+// renew replaces the renderer of the current project, keeping the list of
+// files (and so the decisions kept for undo): after an approval (D-64).
+func (s *Server) renew() {
+	s.curMu.Lock()
+	s.R = newRenderer(s.P)
+	s.curMu.Unlock()
 }
 
 func sameStrings(a, b []string) bool {
@@ -435,17 +459,54 @@ func (s *Server) stop(w http.ResponseWriter, r *http.Request) {
 	s.stopOnce.Do(func() { close(s.Stop) })
 }
 
+// hashEntry is a hash kept, with what the file was when it was read.
+type hashEntry struct {
+	size int64
+	mod  time.Time
+	hash string
+	at   time.Time
+}
+
+// hashFresh is how long a kept hash is trusted for a file whose size and
+// time have not changed: a change that keeps both (same size, same instant)
+// is seen at the latest after it. Only the display waits: every write checks
+// the bytes of the file (store.WriteIfUnchanged).
+var hashFresh = 30 * time.Second
+
+// fileHash returns the hash of the file at path ("" if unreadable), read
+// again only if its size or time changed, or the hash kept is old (P21.10).
+func (s *Server) fileHash(path string) string {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return ""
+	}
+	s.hashMu.Lock()
+	e, ok := s.hashKept[path]
+	s.hashMu.Unlock()
+	if ok && e.size == fi.Size() && e.mod.Equal(fi.ModTime()) && time.Since(e.at) < hashFresh {
+		return e.hash
+	}
+	d, err := store.Read(path)
+	if err != nil {
+		return ""
+	}
+	s.hashMu.Lock()
+	if s.hashKept == nil {
+		s.hashKept = map[string]hashEntry{}
+	}
+	// The size and time read before the content: a change in between makes
+	// them differ at the next poll, and the file is read again.
+	s.hashKept[path] = hashEntry{fi.Size(), fi.ModTime(), d.Hash, time.Now()}
+	s.hashMu.Unlock()
+	return d.Hash
+}
+
 func (s *Server) hashes(w http.ResponseWriter, r *http.Request) {
 	s.refreshSoon()
 	c := s.cur()
 	files := []map[string]any{}
 	for i := range c.P.Files {
-		d, err := store.Read(c.P.Path(i))
-		h := ""
-		if err == nil {
-			h = d.Hash
-		}
-		files = append(files, map[string]any{"index": i, "hash": h})
+		files = append(files, map[string]any{"index": i, "hash": s.fileHash(c.P.Path(i))})
 	}
 	// The sequence number of the last event of the journal: the interface
 	// reloads the state of the exchange when it changes (a handover without
@@ -454,7 +515,7 @@ func (s *Server) hashes(w http.ResponseWriter, r *http.Request) {
 	// The presence of the agent changes without any change of the files or
 	// of the journal (P10.1): it comes with each poll.
 	hand, since, turn := s.handAt(c, seq)
-	out := map[string]any{"files": files, "seq": seq, "filesGen": c.Gen, "agent": c.N.Agent(hand, since)}
+	out := map[string]any{"files": files, "seq": seq, "filesGen": c.Gen, "agent": c.N.Agent(hand, since), "approval": c.R.Pending()}
 	ai := s.agentInfoOf(c, turn)
 	out["tasks"] = ai.Tasks
 	out["agentsConfigured"], out["textAgent"], out["textRequires"], out["run"] = ai.AgentsConfigured, ai.TextAgent, ai.TextRequires, ai.Run
@@ -902,8 +963,36 @@ func decode(w http.ResponseWriter, r *http.Request, v any) bool {
 		jsonError(w, http.StatusBadRequest, "json", fmt.Sprintf("requête illisible : %v", err))
 		return false
 	}
+	// One object, and nothing after it (audit A13): a body with a second
+	// object or garbage at its end is refused before any change.
+	if _, err := dec.Token(); err != io.EOF {
+		jsonError(w, http.StatusBadRequest, "json", "requête illisible : un seul objet JSON attendu")
+		return false
+	}
 	return true
 }
+
+// ListenFor opens the listener of the server of the project at root, on
+// 127.0.0.1 (D-07). Its port is drawn from root, the same at every start, so
+// that the browser sees the same origin from one session to the next: what
+// the interface keeps there (view, tab, part shown, mirrors of the drafts)
+// is found again (audit A12). Taken by another program, a free port is used.
+func ListenFor(root string) (net.Listener, int, error) {
+	h := fnv.New32a()
+	h.Write([]byte(root))
+	port := stablePortBase + int(h.Sum32()%stablePortSpan)
+	if l, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(port)); err == nil {
+		return l, port, nil
+	}
+	return Listen()
+}
+
+// The stable ports lie under the ephemeral range of Linux (32768 and above)
+// and of Windows (49152 and above): a port taken by chance is rarer there.
+const (
+	stablePortBase = 20000
+	stablePortSpan = 12000
+)
 
 // Listen opens a listener on 127.0.0.1 (D-07), on a free port.
 func Listen() (net.Listener, int, error) {
@@ -1127,6 +1216,7 @@ func (s *Server) preview(w http.ResponseWriter, r *http.Request) {
 
 type decideRequest struct {
 	Via      string `json:"via,omitempty"`
+	Task     string `json:"task,omitempty"` // only the proposals of this mission (D-65)
 	File     int    `json:"file"`
 	Hash     string `json:"hash"`
 	Start    int    `json:"start"`
@@ -1150,7 +1240,7 @@ func (s *Server) decide(w http.ResponseWriter, r *http.Request) {
 	switch req.Decision {
 	case navette.Accept, navette.Reject:
 		s.edit(w, r, req.File, req.Hash, "decide", req.Decision, func(src []byte, _ *sourcemap.Map, _ *review.Gen) (patch.Edit, *apiError) {
-			e, err := navette.DecideVia(src, req.Start, req.End, req.Decision, req.Via)
+			e, err := navette.DecideFiltered(src, req.Start, req.End, req.Decision, req.Via, req.Task)
 			if err == nil {
 				s.remember(req.File, src, e)
 			}

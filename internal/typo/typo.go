@@ -120,6 +120,9 @@ func excluded(src []byte, quotes bool) []bool {
 		regexp.MustCompile(`(?s)\$[^$]*\$`),
 		regexp.MustCompile(`<[^>\r\n]*>`),
 		regexp.MustCompile(`(?m)^ {0,3}>.*$`),
+		// Bare addresses and paths (audit A8): « page?x=1 » is not a question.
+		regexp.MustCompile(`(?i)\b(?:[a-z][a-z0-9+.-]*://|www\.|mailto:)[^\s<>]*[^\s<>.,;:!?»)\]]`),
+		regexp.MustCompile(`\b[A-Za-z]:\\[^\s<>]*`),
 	} {
 		for _, p := range re.FindAllIndex(src, -1) {
 			mark(p[0], p[1])
@@ -312,9 +315,15 @@ func Find(src []byte, m *sourcemap.Map, rules []Rule) ([]Correction, error) {
 				continue
 			}
 			c := Correction{r.ID, s, e, string(replacement[p : len(replacement)-q])}
+			// A space next to a space already there (audit A7): the author's
+			// narrow no-break space (U+202F), thin space… is kept as it is,
+			// whatever the rules of typo.json say.
+			if spacesOnly(c.Text) && (spaceBefore(src, s) || spaceAt(src, e)) {
+				continue
+			}
 			overlap := false
 			for _, old := range out {
-				if c.Start <= old.End && c.End >= old.Start {
+				if overlaps(c, old) {
 					overlap = true
 					break
 				}
@@ -325,7 +334,58 @@ func Find(src []byte, m *sourcemap.Map, rules []Rule) ([]Correction, error) {
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Start < out[j].Start })
-	return out, nil
+	return merge(out), nil
+}
+
+// overlaps reports whether two corrections touch the same bytes, or insert at
+// the same place; two corrections that only meet do not overlap (audit A11).
+func overlaps(a, b Correction) bool {
+	if a.Start == a.End && b.Start == b.End {
+		return a.Start == b.Start
+	}
+	return a.Start < b.End && a.End > b.Start
+}
+
+// merge joins corrections that meet (« Bien...! »: the ellipsis and the
+// space before « ! ») into one proposal, since two marks side by side would
+// touch each other.
+func merge(cs []Correction) []Correction {
+	out := []Correction{}
+	for _, c := range cs {
+		if n := len(out); n > 0 && out[n-1].End == c.Start {
+			last := &out[n-1]
+			last.Rule += "+" + c.Rule
+			last.Text += c.Text
+			last.End = c.End
+			continue
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
+func isSpace(r rune) bool { return r == '\t' || unicode.Is(unicode.Zs, r) }
+
+func spacesOnly(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if !isSpace(r) {
+			return false
+		}
+	}
+	return true
+}
+
+func spaceBefore(src []byte, at int) bool {
+	r, n := utf8.DecodeLastRune(src[:at])
+	return n > 0 && isSpace(r)
+}
+
+func spaceAt(src []byte, at int) bool {
+	r, n := utf8.DecodeRune(src[at:])
+	return n > 0 && isSpace(r)
 }
 
 // Propose creates one signed ordinary annotation per correction, from right to left.

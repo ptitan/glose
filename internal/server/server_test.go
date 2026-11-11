@@ -22,6 +22,7 @@ import (
 	"github.com/ptitan/glose/internal/project"
 	"github.com/ptitan/glose/internal/projection"
 	"github.com/ptitan/glose/internal/review"
+	"github.com/ptitan/glose/internal/trust"
 )
 
 const token = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
@@ -36,6 +37,11 @@ func needPandoc(t *testing.T) {
 
 func newServer(t *testing.T, files map[string]string) (*Server, string) {
 	t.Helper()
+	// Never the author's configuration (agents, approvals D-64): a test that
+	// sets its own before keeps it.
+	if os.Getenv("GLOSE_CONFIG_DIR") == "" {
+		t.Setenv("GLOSE_CONFIG_DIR", t.TempDir())
+	}
 	dir := t.TempDir()
 	for name, content := range files {
 		p := filepath.Join(dir, filepath.FromSlash(name))
@@ -169,6 +175,7 @@ end
 		t.Fatal(err)
 	}
 	s.P.Filter = filter
+	approveFilter(t, s)
 	w := do(t, s, "GET", "/api/doc", nil)
 	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "stale-render") {
 		t.Fatalf("rendu périmé présenté comme actuel : %d %s", w.Code, w.Body.String())
@@ -1208,5 +1215,75 @@ func TestAmendOwnMessages(t *testing.T) {
 	}
 	if read() != agent {
 		t.Fatal("fichier modifié par un refus")
+	}
+}
+
+// Audit A13: a body is one JSON object, nothing after it; nothing is written.
+func TestDecodeRefusesTrailingData(t *testing.T) {
+	needPandoc(t)
+	src := "Un texte.\n"
+	s, dir := newServer(t, map[string]string{"a.md": src})
+	hash := getDoc(t, s).Files[0].Hash
+	one := `{"file":0,"hash":"` + hash + `","mode":"passage","start":0,"end":2,"text":"x"}`
+	for _, body := range []string{one + ` {"file":0}`, one + ` garbage`} {
+		r := httptest.NewRequest("POST", "/api/comment", strings.NewReader(body))
+		r.Host = host
+		r.Header.Set("X-Glose-Token", token)
+		r.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		if w.Code != 400 {
+			t.Fatalf("%q : %d %s", body, w.Code, w.Body)
+		}
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "a.md")); string(b) != src {
+		t.Fatalf("écrit : %q", b)
+	}
+	r := httptest.NewRequest("POST", "/api/comment", strings.NewReader(one+"\n"))
+	r.Host = host
+	r.Header.Set("X-Glose-Token", token)
+	r.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	if w.Code != 200 {
+		t.Fatalf("objet seul refusé : %d %s", w.Code, w.Body)
+	}
+}
+
+// approveFilter approves the filter of the test server, as the author would
+// (D-64).
+func approveFilter(t *testing.T, s *Server) {
+	t.Helper()
+	if _, err := trust.Approve(s.P.Root, trust.Of(s.P.Root, s.P.Pandoc, s.P.Filter)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Audit A12: the same project listens on the same port from one start to the
+// next (same origin for the browser); a port taken falls back to a free one.
+func TestListenForIsStable(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "projet")
+	l, port, err := ListenFor(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if port < stablePortBase || port >= stablePortBase+stablePortSpan {
+		l.Close()
+		t.Skipf("port stable occupé sur cette machine : %d", port)
+	}
+	// Taken (by the first one): another, free port.
+	l2, port2, err := ListenFor(root)
+	if err != nil || port2 == port {
+		t.Fatalf("%d %v", port2, err)
+	}
+	l2.Close()
+	l.Close()
+	l3, port3, err := ListenFor(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l3.Close()
+	if port3 != port {
+		t.Fatalf("port changé : %d puis %d", port, port3)
 	}
 }

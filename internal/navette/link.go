@@ -281,6 +281,16 @@ func (n *Navette) TakeTurn(name, code string) (bool, error) {
 // TakeTurn): refused if a bound session owns it. It returns the owner that
 // refused, if any.
 func (n *Navette) ReserveLaunch(name string) (*Owner, error) {
+	return n.ReserveLaunchThen(name, nil)
+}
+
+// ReserveLaunchThen reserves the turn as ReserveLaunch does, then calls start
+// with the history read under the lock, still holding the lock of the
+// project (audit A2): no handover (the author taking the hand back) can come
+// between the reservation and the start of the agent, and what is launched
+// is built from the turn that was reserved. start is not called when the
+// reservation is refused.
+func (n *Navette) ReserveLaunchThen(name string, start func(h *History) error) (*Owner, error) {
 	lock, err := n.Lock(lockWait)
 	if err != nil {
 		return nil, err
@@ -293,6 +303,41 @@ func (n *Navette) ReserveLaunch(name string) (*Owner, error) {
 	if h.Hand() != review.Agent {
 		return nil, errors.New("la main n'est pas à l'agent")
 	}
+	if o, err := n.reserve(h, name); o != nil || err != nil {
+		return o, err
+	}
+	if start != nil {
+		return nil, start(h)
+	}
+	return nil, nil
+}
+
+// ErrNotThisTurn means that the hand is no longer at the agent for the turn
+// expected (the author took it back, or another turn began).
+var ErrNotThisTurn = errors.New("la main n'est plus à l'agent pour ce tour")
+
+// WhileTurn runs f under the lock of the project if the hand is at the agent
+// for turn: no handover can come in between (audit A2, for the passes of
+// P10.6, which share the turn with a bound session and so do not reserve it).
+func (n *Navette) WhileTurn(turn int, f func() error) error {
+	lock, err := n.Lock(lockWait)
+	if err != nil {
+		return err
+	}
+	defer lock.Unlock()
+	h, err := n.History()
+	if err != nil {
+		return err
+	}
+	if h.Hand() != review.Agent || h.Turn() != turn {
+		return ErrNotThisTurn
+	}
+	return f()
+}
+
+// reserve records the launch under name as the owner of the turn of h, under
+// the lock of the links, unless a bound session owns it (returned).
+func (n *Navette) reserve(h *History, name string) (*Owner, error) {
 	dir := n.P.State()
 	lk, err := lockLink(dir)
 	if err != nil {

@@ -203,3 +203,70 @@ func TestTakeTurnAfterItsPartAndReserveLaunch(t *testing.T) {
 		t.Fatalf("lancement par-dessus une session liée : %+v %v", o, err)
 	}
 }
+
+// Audit A2: the launch starts under the lock of the project, from the turn it
+// reserved; the author taking the hand back waits until it has started.
+func TestReserveLaunchThenHoldsTheLock(t *testing.T) {
+	w := newWorld(t, map[string]string{"a.md": "Texte.\n"})
+	if _, err := w.n.Handoff("author", ""); err != nil {
+		t.Fatal(err)
+	}
+	reclaimed := make(chan error, 1)
+	var seen int
+	o, err := w.n.ReserveLaunchThen("Sol", func(h *History) error {
+		seen = h.Turn()
+		go func() { _, err := w.n.Reclaim("", false); reclaimed <- err }()
+		select {
+		case err := <-reclaimed:
+			return fmt.Errorf("reprise pendant le démarrage : %v", err)
+		case <-time.After(300 * time.Millisecond):
+		}
+		return nil
+	})
+	if err != nil || o != nil {
+		t.Fatalf("%+v %v", o, err)
+	}
+	if err := <-reclaimed; err != nil {
+		t.Fatalf("reprise après le démarrage : %v", err)
+	}
+	h, _ := w.n.History()
+	if h.Hand() != "author" || seen == 0 {
+		t.Fatalf("main %s, tour vu %d", h.Hand(), seen)
+	}
+	// Not the agent's hand: nothing is started.
+	called := false
+	if _, err := w.n.ReserveLaunchThen("Sol", func(*History) error { called = true; return nil }); err == nil || called {
+		t.Fatalf("lancé sans la main : %v %v", err, called)
+	}
+}
+
+// Codex review of lot P21: a pass starts under the lock of the project, for
+// its turn only; the author taking the hand back waits.
+func TestWhileTurn(t *testing.T) {
+	w := newWorld(t, map[string]string{"a.md": "Texte.\n"})
+	called := false
+	if err := w.n.WhileTurn(1, func() error { called = true; return nil }); err != ErrNotThisTurn || called {
+		t.Fatalf("main à l'auteur : %v %v", err, called)
+	}
+	w.n.Handoff("author", "")
+	h, _ := w.n.History()
+	if err := w.n.WhileTurn(h.Turn()+2, func() error { called = true; return nil }); err != ErrNotThisTurn || called {
+		t.Fatalf("autre tour : %v %v", err, called)
+	}
+	reclaimed := make(chan error, 1)
+	err := w.n.WhileTurn(h.Turn(), func() error {
+		go func() { _, err := w.n.Reclaim("", false); reclaimed <- err }()
+		select {
+		case err := <-reclaimed:
+			return fmt.Errorf("reprise pendant le démarrage : %v", err)
+		case <-time.After(300 * time.Millisecond):
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := <-reclaimed; err != nil {
+		t.Fatal(err)
+	}
+}

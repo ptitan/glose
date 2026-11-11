@@ -54,3 +54,16 @@ test('gestes des cartes et du sommaire, dans le code', () => {
 test('barre d’outils de l’éditeur', () => {
   for (const cmd of ['bold', 'italic', 'lien', 'note', 'tableau', 'liste']) assert.ok(page.includes(`data-cmd="${cmd}"`), cmd);
 });
+
+// Audit A14: an exception during a save never leaves the panel frozen.
+test('enregistrement : panneau et écritures libérés dans un finally', () => {
+  for (const nom of ['edition.js', 'saisie.js']) {
+    const src = web(nom);
+    const i = src.indexOf('S.envoi = true;');
+    const fin = src.indexOf('} finally {', i);
+    assert.ok(i >= 0 && fin > i, nom + ' : pas de finally après S.envoi = true');
+    const bloc = src.slice(fin, src.indexOf('}', fin + 12));
+    assert.match(bloc, /S\.envoi = false;/, nom);
+    assert.match(bloc, /\.inert = false;/, nom);
+  }
+});

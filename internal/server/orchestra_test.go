@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -229,5 +230,62 @@ func TestPassesResumedAfterARestart(t *testing.T) {
 	h, _ = s.N.History()
 	if note := h.Last().TurnEv.Note; !strings.Contains(note, "Sol : interrompu par un redémarrage du serveur") || !strings.Contains(note, "Luna : fait par Luna") {
 		t.Fatalf("note : %q", note)
+	}
+}
+
+// Audit A4: a pass whose start cannot be recorded is not launched, and the
+// author is told.
+func TestPassNotLaunchedWhenItsStateIsNotRecorded(t *testing.T) {
+	s, dir := passWorld(t, "pass")
+	prev := updatePasses
+	updatePasses = func(string, func(*navette.Passes) *navette.Passes) error { return os.ErrPermission }
+	defer func() { updatePasses = prev }()
+	out := handoffAndLaunch(t, s, nil)
+	for end := time.Now().Add(5 * time.Second); navette.ReadPasses(s.P.State()) != nil; time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(end) {
+			t.Fatal("plan gardé")
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, ".glose", "agent", "tour-1.log")); err == nil {
+		log, _ := os.ReadFile(filepath.Join(dir, ".glose", "agent", "tour-1.log"))
+		t.Fatalf("agent lancé : %s", log)
+	}
+	if !strings.Contains(s.lastLaunchError(), "non enregistré") {
+		t.Fatalf("rien n'est dit : %q (%v)", s.lastLaunchError(), out)
+	}
+}
+
+// Codex review of lot P21: the end of a pass that cannot be recorded stops
+// the orchestration; the plan stays, nothing is handed over, the author is
+// told.
+func TestPassEndNotRecordedKeepsThePlan(t *testing.T) {
+	s, _ := passWorld(t, "quit")
+	prev := updatePasses
+	calls := 0
+	var mu sync.Mutex
+	updatePasses = func(dir string, f func(*navette.Passes) *navette.Passes) error {
+		mu.Lock()
+		calls++
+		n := calls
+		mu.Unlock()
+		if n == 1 {
+			return prev(dir, f) // running: recorded
+		}
+		return os.ErrPermission
+	}
+	defer func() { updatePasses = prev }()
+	handoffAndLaunch(t, s, nil)
+	for end := time.Now().Add(10 * time.Second); !strings.Contains(s.lastLaunchError(), "non enregistré"); time.Sleep(20 * time.Millisecond) {
+		if time.Now().After(end) {
+			t.Fatalf("rien n'est dit : %q", s.lastLaunchError())
+		}
+	}
+	time.Sleep(300 * time.Millisecond)
+	ps := navette.ReadPasses(s.P.State())
+	if ps == nil || ps.Passes[0].State != navette.PassRunning {
+		t.Fatalf("plan perdu : %+v", ps)
+	}
+	if hand(t, s) != review.Agent {
+		t.Fatal("remis malgré un passage non enregistré")
 	}
 }

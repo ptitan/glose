@@ -24,7 +24,7 @@ func browserCommand(url string) *exec.Cmd {
 	}
 	switch name {
 	case "cmd.exe":
-		cmd := exec.Command("cmd.exe", "/c", "start", "", url)
+		cmd := exec.Command("cmd.exe", cmdStartArgs(url)...)
 		// cmd.exe refuses a Linux working directory: it runs in its own
 		// (System32, wherever Windows is mounted).
 		if p, err := exec.LookPath("cmd.exe"); err == nil {

@@ -97,7 +97,7 @@ func (r *Runner) Start(l Launch) (Status, error) {
 	}
 	// The whole tree of processes is stopped: at the deadline, by the
 	// author, and once the agent has ended (what it left running).
-	ownGroup(cmd)
+	ownTree(cmd)
 	var trp atomic.Pointer[tree] // set once started, read by the cancellation
 	cmd.Cancel = func() error {
 		if tr := trp.Load(); tr != nil {
@@ -121,13 +121,32 @@ func (r *Runner) Start(l Launch) (Status, error) {
 		cancel()
 		return Status{}, err
 	}
-	tr := newTree(cmd)
+	tr, err := newTree(cmd)
 	trp.Store(tr)
-	ru := &run{cmd: cmd, tree: tr, cancel: cancel, done: make(chan struct{}), Status: Status{Running: true, Alias: l.Name, Agent: l.Agent, Model: l.Model,
-		PID: cmd.Process.Pid, Turn: l.Turn, Log: logName, Started: now.UTC().Format(time.RFC3339Nano)}}
-	r.cur = ru
+	if err != nil {
+		cancel()
+		cmd.Wait()
+		tr.close()
+		fmt.Fprintf(logf, "\n— Glose : arrêté aussitôt (%v) —\n", err)
+		logf.Close()
+		return Status{}, err
+	}
 	pid := cmd.Process.Pid
-	navette.TouchLaunched(l.State, l.Name, l.Turn, pid, proc.Identity(pid), now.Add(l.Max), l.Model)
+	// Without its presence (process, identity, deadline), a server started
+	// again would not find this agent, and could launch another one: the
+	// launch fails, and the agent is stopped (audit A3).
+	if err := touchLaunched(l.State, l.Name, l.Turn, pid, proc.Identity(pid), now.Add(l.Max), l.Model); err != nil {
+		tr.stop()
+		cancel()
+		cmd.Wait()
+		tr.close()
+		fmt.Fprintf(logf, "\n— Glose : arrêté aussitôt, présence non enregistrée (%v) —\n", err)
+		logf.Close()
+		return Status{}, fmt.Errorf("lancement annulé, présence de l'agent non enregistrée : %w", err)
+	}
+	ru := &run{cmd: cmd, tree: tr, cancel: cancel, done: make(chan struct{}), Status: Status{Running: true, Alias: l.Name, Agent: l.Agent, Model: l.Model,
+		PID: pid, Turn: l.Turn, Log: logName, Started: now.UTC().Format(time.RFC3339Nano)}}
+	r.cur = ru
 	go func() {
 		err := cmd.Wait()
 		tr.stop() // what the agent left running
@@ -355,3 +374,7 @@ func Tail(state, name string, max int64) (string, error) {
 func filepathJoin(state, name string) string {
 	return filepath.Join(state, filepath.FromSlash(name))
 }
+
+// touchLaunched records the presence of a launched agent; tests replace it
+// to simulate a failure.
+var touchLaunched = navette.TouchLaunched

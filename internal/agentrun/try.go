@@ -75,7 +75,7 @@ func Try(ctx context.Context, s Spec) Result {
 	if err != nil {
 		return Result{Error: err.Error(), ExitCode: -1}
 	}
-	ownGroup(cmd)
+	ownTree(cmd)
 	var trp atomic.Pointer[tree] // set once started, read by the cancellation
 	cmd.Cancel = func() error {
 		if tr := trp.Load(); tr != nil {
@@ -88,9 +88,12 @@ func Try(ctx context.Context, s Spec) Result {
 	cmd.Stdout, cmd.Stderr = out, out
 	start := time.Now()
 	if err = cmd.Start(); err == nil {
-		tr := newTree(cmd)
+		tr, terr := newTree(cmd)
 		trp.Store(tr)
 		err = cmd.Wait()
+		if terr != nil {
+			err = terr
+		}
 		tr.stop() // what the agent left running
 		tr.close()
 	}

@@ -402,3 +402,17 @@ func TestTrackCorrectionReducedToTheEmptySetSymbol(t *testing.T) {
 		t.Fatalf("%q", e.Apply(src))
 	}
 }
+
+// P21.10: memory of the worst comparison, refused at maxChanges.
+func BenchmarkMyersWorstCase(b *testing.B) {
+	x, y := make([]int, maxChanges), make([]int, maxChanges)
+	for i := range x {
+		x[i], y[i] = i, maxChanges+i
+	}
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		if _, err := myers(x, y); err != ErrTooManyChanges {
+			b.Fatal(err)
+		}
+	}
+}

@@ -417,17 +417,25 @@ window.GloseEdition = (() => {
     if (direct) Object.assign(req, { note: "", recipient: "", whole: false, direct: true });
     S.envoi = true;
     S.occupe++;
-    $("edition-ok").disabled = true;
-    $("edition-direct").disabled = true;
-    $("edition").querySelector(".corps").inert = true;
-    const pret = await preparerBrouillon("edition");
-    const r = pret ? await api(correction ? "/api/revise" : "/api/edit", req)
-      : { ok: false, status: 400, data: { message: "Brouillon non confirmé : vérifiez sa sauvegarde avant d'enregistrer." } };
-    await apresEnvoiBrouillon(x, r);
-    $("edition").querySelector(".corps").inert = false;
-    $("edition-ok").disabled = false;
-    majDirect();
-    S.envoi = false;
+    let r = null;
+    // The panel and the writes are released whatever happens (audit A14):
+    // an unexpected exception must not leave them frozen until a reload.
+    try {
+      $("edition-ok").disabled = true;
+      $("edition-direct").disabled = true;
+      $("edition").querySelector(".corps").inert = true;
+      const pret = await preparerBrouillon("edition");
+      r = pret ? await api(correction ? "/api/revise" : "/api/edit", req)
+        : { ok: false, status: 400, data: { message: "Brouillon non confirmé : vérifiez sa sauvegarde avant d'enregistrer." } };
+      await apresEnvoiBrouillon(x, r);
+    } catch (e) {
+      r = r || { ok: false, status: 0, data: { message: "L'enregistrement a échoué (" + e.message + ") : votre saisie reste dans Brouillons." } };
+    } finally {
+      $("edition").querySelector(".corps").inert = false;
+      $("edition-ok").disabled = false;
+      majDirect();
+      S.envoi = false;
+    }
     try {
       if (r.ok) {
         S.annuler.push(correction

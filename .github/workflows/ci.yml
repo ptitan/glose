@@ -1,0 +1,70 @@
+# Contrôles de Glose à chaque envoi et à chaque demande de fusion : les mêmes
+# que scripts/check.sh, plus le détecteur de courses, et les tests sous
+# Windows natif avec pandoc (D-16). Actions figées par leur commit ; pandoc
+# figé par sa version et son empreinte.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  PANDOC_VERSION: "3.1.3"
+
+jobs:
+  linux:
+    name: Linux (check.sh, courses)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+      - name: pandoc
+        run: |
+          deb="pandoc-${PANDOC_VERSION}-1-amd64.deb"
+          curl -sSLo "$RUNNER_TEMP/$deb" "https://github.com/jgm/pandoc/releases/download/${PANDOC_VERSION}/$deb"
+          echo "caa7e0410f9e2cb1da2eb8db13cc97b5548fe455985e2c944e3929d22f99bcdc  $RUNNER_TEMP/$deb" | sha256sum -c -
+          sudo dpkg -i "$RUNNER_TEMP/$deb"
+          pandoc --version | head -1
+      - name: check.sh
+        run: ./scripts/check.sh
+      - name: go test -race
+        run: go test -race -count=1 ./...
+
+  windows:
+    name: Windows natif (go test)
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: pandoc
+        shell: pwsh
+        run: |
+          $zip = "pandoc-$env:PANDOC_VERSION-windows-x86_64.zip"
+          $dest = Join-Path $env:RUNNER_TEMP $zip
+          Invoke-WebRequest -Uri "https://github.com/jgm/pandoc/releases/download/$env:PANDOC_VERSION/$zip" -OutFile $dest
+          $hash = (Get-FileHash -Algorithm SHA256 $dest).Hash.ToLower()
+          if ($hash -ne "9b2d439db3188a624d212e1c73462ebb97453427cb470dc08bb31bf128429337") { throw "empreinte de pandoc inattendue : $hash" }
+          Expand-Archive -Path $dest -DestinationPath $env:RUNNER_TEMP
+          $dir = Join-Path $env:RUNNER_TEMP "pandoc-$env:PANDOC_VERSION"
+          Add-Content -Path $env:GITHUB_PATH -Value $dir
+          & (Join-Path $dir "pandoc.exe") --version | Select-Object -First 1
+      - name: go vet
+        run: go vet ./...
+      - name: go test
+        run: go test -count=1 ./...

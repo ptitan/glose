@@ -213,13 +213,18 @@ func (s *Server) runPasses(c current, cfg agents.Config, o *orchestra, id string
 		}
 		return p
 	}
-	set := func(i int, f func(*navette.Pass)) {
-		navette.UpdatePasses(state, func(p *navette.Passes) *navette.Passes {
+	// set records a change of a pass; a failure is said (audit A4).
+	set := func(i int, f func(*navette.Pass)) error {
+		err := updatePasses(state, func(p *navette.Passes) *navette.Passes {
 			if p != nil && p.ID == id && i < len(p.Passes) {
 				f(&p.Passes[i])
 			}
 			return p
 		})
+		if err != nil {
+			s.setLaunchError("état des passages non enregistré : " + err.Error())
+		}
+		return err
 	}
 	abandon := func() { navette.RemovePlan(state, id) }
 	var mcp []string
@@ -259,29 +264,49 @@ func (s *Server) runPasses(c current, cfg agents.Config, o *orchestra, id string
 				case <-tick.C:
 				}
 			}
-			set(i, func(x *navette.Pass) {
+			if set(i, func(x *navette.Pass) {
 				if x.State == navette.PassRunning {
 					x.State, x.Error = navette.PassEnded, "interrompu par un redémarrage du serveur"
 				}
-			})
+			}) != nil {
+				return
+			}
 			continue
 		case navette.PassWaiting:
 		default:
 			continue
 		}
-		// Running before it starts: an agent quick to run glose done finds
-		// its pass open.
-		set(i, func(x *navette.Pass) { x.State = navette.PassRunning })
+		// Recorded running before it starts (an agent quick to run glose done
+		// finds its pass open), then started, under the lock of the project
+		// and for this turn still (Codex review of lot P21): the author cannot
+		// take the hand back in between. Not launched if that state is not
+		// recorded (audit A4): the agent could not close its pass, and a
+		// restart would launch it again.
 		ended := make(chan agentrun.Status, 1)
-		_, err := s.runner.Start(agentrun.Launch{
-			Spec: agentrun.Spec{Agent: p.Agent, Model: p.Model, Dir: c.P.Root, Name: p.Alias, MCP: mcp,
-				Env:    []string{navette.PassEnv + "=" + p.Alias},
-				Prompt: agentrun.PassPrompt(p.Alias, c.P.Root, c.P.Agent.Instructions, c.P.Agent.Requires, true)},
-			State: state, Turn: turn, Max: cfg.Max(),
-			Ended: func(st agentrun.Status) { ended <- st },
+		err := s.cur().N.WhileTurn(turn, func() error {
+			if o.cancelled() || current() == nil {
+				return navette.ErrNotThisTurn
+			}
+			if err := set(i, func(x *navette.Pass) { x.State = navette.PassRunning }); err != nil {
+				return errNotRecorded
+			}
+			_, err := s.runner.Start(agentrun.Launch{
+				Spec: agentrun.Spec{Agent: p.Agent, Model: p.Model, Dir: c.P.Root, Name: p.Alias, MCP: mcp,
+					Env:    []string{navette.PassEnv + "=" + p.Alias},
+					Prompt: agentrun.PassPrompt(p.Alias, c.P.Root, c.P.Agent.Instructions, c.P.Agent.Requires, true)},
+				State: state, Turn: turn, Max: cfg.Max(),
+				Ended: func(st agentrun.Status) { ended <- st },
+			})
+			return err
 		})
-		if err != nil {
-			set(i, func(x *navette.Pass) { x.State, x.Error = navette.PassFailed, err.Error() })
+		switch {
+		case errors.Is(err, navette.ErrNotThisTurn), errors.Is(err, errNotRecorded):
+			abandon()
+			return
+		case err != nil:
+			if set(i, func(x *navette.Pass) { x.State, x.Error = navette.PassFailed, err.Error() }) != nil {
+				return // the plan stays as it is; the author is told
+			}
 			continue
 		}
 	wait:
@@ -293,7 +318,10 @@ func (s *Server) runPasses(c current, cfg agents.Config, o *orchestra, id string
 				abandon()
 				return
 			case st := <-ended:
-				set(i, func(x *navette.Pass) {
+				// Its end not recorded (Codex review of lot P21): the plan
+				// stays as it is and nothing is handed over; the author is
+				// told, and a restart of the server takes it up again.
+				if set(i, func(x *navette.Pass) {
 					if x.State == navette.PassRunning {
 						x.State = navette.PassEnded
 						x.Error = fmt.Sprintf("arrêté sans clore son passage (code %d)", st.ExitCode)
@@ -301,7 +329,9 @@ func (s *Server) runPasses(c current, cfg agents.Config, o *orchestra, id string
 							x.Error = st.Error
 						}
 					}
-				})
+				}) != nil {
+					return
+				}
 				break wait
 			case <-tick.C:
 				if !s.stillTurn(turn) || current() == nil {
@@ -361,3 +391,10 @@ func (s *Server) runPasses(c current, cfg agents.Config, o *orchestra, id string
 	}
 	abandon()
 }
+
+// errNotRecorded: the start of a pass could not be recorded.
+var errNotRecorded = errors.New("passage non enregistré")
+
+// updatePasses records a change of the passes of a turn; tests replace it to
+// simulate a failure.
+var updatePasses = navette.UpdatePasses

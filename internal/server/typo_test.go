@@ -85,3 +85,18 @@ func TestTypoRefusesAgentTurnAndInvalidRules(t *testing.T) {
 		t.Fatal("écriture après refus")
 	}
 }
+
+// Audit A7 and A8 through the real source map: nothing to correct.
+func TestTypoKeepsNarrowSpacesAndAddresses(t *testing.T) {
+	needPandoc(t)
+	t.Setenv("GLOSE_CONFIG_DIR", t.TempDir())
+	original := []byte("Un mot ; puis ! et ?\n\nVoir https://exemple.fr/page?x=1 pour plus.\n")
+	s, dir := newServer(t, map[string]string{"a.md": string(original)})
+	w := do(t, s, "POST", "/api/typo", map[string]any{"file": 0, "hash": store.Hash(original)})
+	if w.Code != 422 || !bytes.Contains(w.Body.Bytes(), []byte("unchanged")) {
+		t.Fatal(w.Code, w.Body)
+	}
+	if after, _ := os.ReadFile(filepath.Join(dir, "a.md")); !bytes.Equal(after, original) {
+		t.Fatalf("fichier changé : %q", after)
+	}
+}

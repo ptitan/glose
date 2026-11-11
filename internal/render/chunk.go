@@ -568,7 +568,7 @@ func (r *Renderer) htmlChunked(ctx context.Context, api any, v projection.View, 
 			defer wg.Done()
 			tree, err := treeRaw(api, [][]byte{rel[1 : len(rel)-1]})
 			if err == nil {
-				out[k], err = r.pandoc(ctx, tree, r.htmlArgs()...)
+				out[k], err = r.pandoc(ctx, tree, r.htmlArgs("")...)
 			}
 			if err != nil {
 				errs[k] = err

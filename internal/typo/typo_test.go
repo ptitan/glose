@@ -176,3 +176,42 @@ func TestQuoteSpacingWithoutSpacesAndAmbiguities(t *testing.T) {
 		}
 	}
 }
+
+// Audit A7, A8, A11: an existing Unicode space is kept, bare addresses are
+// left alone, and corrections that meet become one proposal.
+func TestAuditSpacesAddressesAndNeighbours(t *testing.T) {
+	for _, s := range []string{
+		"Un mot\u202f; puis\u202f! et\u202f? «\u202fici\u202f»",
+		"Un mot\u2009; un\u00a0: deux",
+		"Voir https://exemple.fr/page?x=1&y=2 ou www.exemple.fr/a?b pour plus",
+		"Écrire à mailto:nom@exemple.fr?subject=x maintenant",
+		"Le dossier C:\\Users\\a?b reste",
+	} {
+		src := []byte(s)
+		if cs, err := Find(src, certified(src), Defaults()); err != nil || len(cs) != 0 {
+			t.Errorf("%q : %+v %v", s, cs, err)
+		}
+	}
+	// The address is left alone, not the sentence around it.
+	src := []byte("Voir https://exemple.fr/?q=1 ! Vraiment ?")
+	cs, _ := Find(src, certified(src), Defaults())
+	if len(cs) != 2 || cs[0].Start <= bytes.Index(src, []byte("1")) {
+		t.Fatalf("phrase autour de l'adresse : %+v", cs)
+	}
+	src = []byte("Bien...!")
+	cs, _ = Find(src, certified(src), Defaults())
+	if len(cs) != 1 || cs[0].Text != "…\u00a0" || cs[0].Start != 4 || cs[0].End != 7 {
+		t.Fatalf("corrections contiguës : %+v", cs)
+	}
+	edit, err := Propose(src, cs, review.NewGen(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := edit.Apply(src)
+	if got := string(projection.Project(out, projection.Proposed).Text); got != "Bien…\u00a0!" {
+		t.Fatalf("proposé : %q", got)
+	}
+	if !bytes.Equal(projection.Project(out, projection.Current).Text, src) {
+		t.Fatal("original changé")
+	}
+}

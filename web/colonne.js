@@ -394,7 +394,7 @@ window.GloseColonne = (() => {
       if (n < 2) continue;
       const lot = entetes.get(f) || el("div", "fichier lot");
       if (!entetes.has(f)) lot.append(el("span", "", S.doc.files[f].path));
-      lot.dataset.infobulle = n + " propositions en attente dans ce fichier (tous filtres confondus)";
+      lot.dataset.infobulle = n + " propositions en attente dans ce fichier" + (S.filtreMission ? ", pour la mission affichée" : " (tous filtres confondus)");
       for (const [libelle, decision] of [["Tout accepter", "accept"], ["Tout rejeter", "reject"]]) {
         const b = el("button", decision === "accept" ? "accepter" : "", libelle);
         b.type = "button";
@@ -402,7 +402,7 @@ window.GloseColonne = (() => {
         b.dataset.infobulle = libelle;
         b.textContent = "";
         b.innerHTML = icone(decision === "accept" ? "accepter" : "rejeter");
-        b.addEventListener("click", () => deciderTout(f, decision, n));
+        b.addEventListener("click", () => deciderTout(f, decision, n, "", S.filtreMission || ""));
         lot.append(b);
       }
       if (!entetes.has(f)) corps.append(lot);

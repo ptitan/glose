@@ -384,3 +384,18 @@ func TestLineColOutOfRange(t *testing.T) {
 		t.Fatalf("%d %d", l, c)
 	}
 }
+
+// The HTML has LF line endings on every system (--eol=lf): pandoc writes
+// CRLF under Windows by default; found by the first run on Windows with
+// pandoc (CI).
+func TestHTMLHasLFLineEndings(t *testing.T) {
+	needPandoc(t)
+	p := mkproject(t, map[string]string{"a.md": "# Titre\r\n\r\nUn paragraphe.\r\n\r\n- un\r\n- deux\r\n"})
+	d, err := New(p).Render(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(d.HTML, "\r") || !strings.Contains(d.HTML, "\n") {
+		t.Fatalf("fins de ligne : %q", d.HTML)
+	}
+}

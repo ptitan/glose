@@ -219,14 +219,23 @@ func fail(step string) error {
 // and time, and syncs the file. It must be called by the holder of the
 // project lock.
 func (j *Journal) Append(evs ...Event) ([]Event, error) {
-	if err := os.MkdirAll(j.Dir, 0o700); err != nil {
-		return nil, err
-	}
-	b, err := os.ReadFile(j.Path())
-	if err != nil && !errors.Is(err, os.ErrNotExist) {
+	// The directory is created, durably, by store.OpenJournal below: store
+	// is the only package that writes (audit A16).
+	// Only the end of the journal is read (P21.10): its last event, and a
+	// last line left without its line ending. The whole journal only if
+	// that end holds no event (a line longer than the end read).
+	b, base, err := j.tail()
+	if err != nil {
 		return nil, err
 	}
 	events, _, _ := parse(b)
+	if len(events) == 0 && base > 0 {
+		if b, err = os.ReadFile(j.Path()); err != nil {
+			return nil, err
+		}
+		base = 0
+		events, _, _ = parse(b)
+	}
 	seq := int64(0)
 	if len(events) > 0 {
 		seq = events[len(events)-1].Seq
@@ -241,7 +250,7 @@ func (j *Journal) Append(evs ...Event) ([]Event, error) {
 		}
 		seq++
 		rep := Event{Seq: seq, Time: j.stamp(), Type: Repair,
-			Reason: fmt.Sprintf("ligne tronquée à l'octet %d (%d octets) : écriture interrompue, gardée telle quelle", start, len(b)-start)}
+			Reason: fmt.Sprintf("ligne tronquée à l'octet %d (%d octets) : écriture interrompue, gardée telle quelle", base+int64(start), len(b)-start)}
 		line, _ := json.Marshal(rep)
 		buf.Write(line)
 		buf.WriteByte('\n')

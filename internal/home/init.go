@@ -53,6 +53,17 @@ func Init(path, to, kind string, stdout, stderr io.Writer) error {
 	if fi, err := os.Stat(root); err != nil || !fi.IsDir() {
 		return fmt.Errorf("%s n'est pas un dossier", path)
 	}
+	// Never outside the project (audit A6), refused before anything is
+	// written: --to names a file of the project. A link of the project is
+	// still followed without a template, as before (shared instructions).
+	if to != "" {
+		if filepath.IsAbs(to) || filepath.VolumeName(to) != "" {
+			return fmt.Errorf("--to %s : chemin relatif au projet attendu", to)
+		}
+		if c := filepath.Clean(to); c == ".." || strings.HasPrefix(c, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("--to %s : hors du projet", to)
+		}
+	}
 	// Inside a project already (a profile above): a profile here would make
 	// a separate project, with its own navette (D-35).
 	if real, err := filepath.EvalSymlinks(root); err == nil {

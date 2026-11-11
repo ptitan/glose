@@ -334,13 +334,6 @@ func (s *Server) saveAgents(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.agentsState(r.Context(), nil))
 }
 
-// agentsConfigured tells the interface whether a default agent is recorded
-// (« Aucun agent configuré », P10.3).
-func agentsConfigured() bool {
-	c, err := agents.Load()
-	return err == nil && c.Configured()
-}
-
 // settingsIdle stops the settings server when its page has made no request
 // for that long (it pings every 10 s; a hidden tab may be slowed down to one
 // request a minute); settingsFirst leaves time to open it.
@@ -561,7 +554,7 @@ func (s *Server) afterHandoff(c current, p launchPlan) {
 	case p.passes != nil:
 		if text, ok := textAgent(p.cfg, c.P); ok {
 			fresh := plan(recipients(c, p.cfg), p.cfg, text, p.linked)
-			navette.UpdatePasses(c.P.State(), func(q *navette.Passes) *navette.Passes {
+			err := navette.UpdatePasses(c.P.State(), func(q *navette.Passes) *navette.Passes {
 				if q == nil || q.ID != p.passes.ID {
 					return q
 				}
@@ -574,6 +567,10 @@ func (s *Server) afterHandoff(c current, p launchPlan) {
 				}
 				return q
 			})
+			if err != nil {
+				// The plan keeps the counts of the handover (audit A4).
+				s.setLaunchError("passages non mis à jour : " + err.Error())
+			}
 		}
 		s.orchestrate(c, p.cfg, p.passes)
 	case p.single != nil:
@@ -602,44 +599,45 @@ func (s *Server) launch(c current) (agentrun.Status, error) {
 	return s.launchAlias(c, cfg, a)
 }
 
-// launchAlias starts the agent a for the turn in progress.
+// launchAlias starts the agent a for the turn in progress. The turn is
+// reserved, the run built from it and the agent started under the lock of
+// the project (audit A2): the author cannot take the hand back in between.
 func (s *Server) launchAlias(c current, cfg agents.Config, a agents.Alias) (agentrun.Status, error) {
-	h, err := c.N.History()
-	if err != nil {
-		return agentrun.Status{}, err
-	}
-	if h.Hand() != review.Agent {
-		return agentrun.Status{}, errors.New("la main n'est pas à l'agent")
-	}
-	// A bound session that took this turn keeps it (Codex audits); a turn
-	// reserved for a launch (which may have failed) may be launched again.
-	// Read and reserved under the lock of the project, as glose join does.
-	if o, err := c.N.ReserveLaunch(a.Name); err != nil {
-		return agentrun.Status{}, err
-	} else if o != nil {
-		return agentrun.Status{}, fmt.Errorf("%s (session liée) mène ce tour : rien n'est lancé à côté", o.Name)
-	}
 	var mcp []string
 	for _, q := range c.P.Agent.Requires {
 		if name, ok := strings.CutPrefix(q, "mcp:"); ok {
 			mcp = append(mcp, name)
 		}
 	}
-	spec := agentrun.Spec{Agent: a.Agent, Model: a.Model, Dir: c.P.Root, Name: a.Name, MCP: mcp, Prompt: agentrun.TurnPrompt(a.Name, c.P.Root, c.P.Agent.Instructions, c.P.Agent.Requires)}
-	max := cfg.Max()
-	if l := h.Last(); l != nil && l.Actor == review.Author && l.TurnEv.Task != nil {
-		t := l.TurnEv.Task
-		if t.Agent.Name != a.Name {
-			return agentrun.Status{}, fmt.Errorf("ce tour est réservé à %s", t.Agent.Name)
+	var st agentrun.Status
+	// A bound session that took this turn keeps it (Codex audits); a turn
+	// reserved for a launch (which may have failed) may be launched again.
+	o, err := c.N.ReserveLaunchThen(a.Name, func(h *navette.History) error {
+		spec := agentrun.Spec{Agent: a.Agent, Model: a.Model, Dir: c.P.Root, Name: a.Name, MCP: mcp, Prompt: agentrun.TurnPrompt(a.Name, c.P.Root, c.P.Agent.Instructions, c.P.Agent.Requires)}
+		max := cfg.Max()
+		if l := h.Last(); l != nil && l.Actor == review.Author && l.TurnEv.Task != nil {
+			t := l.TurnEv.Task
+			if t.Agent.Name != a.Name {
+				return fmt.Errorf("ce tour est réservé à %s", t.Agent.Name)
+			}
+			spec.Root = c.P.Root
+			spec.Dir = t.Workdir
+			spec.Access = &t.Access
+			spec.MCP = t.Access.MCP
+			spec.Prompt = agentrun.TaskPrompt(spec.Prompt, c.P.Root, *t)
+			max = time.Duration(t.MaxMinutes) * time.Minute
 		}
-		spec.Root = c.P.Root
-		spec.Dir = t.Workdir
-		spec.Access = &t.Access
-		spec.MCP = t.Access.MCP
-		spec.Prompt = agentrun.TaskPrompt(spec.Prompt, c.P.Root, *t)
-		max = time.Duration(t.MaxMinutes) * time.Minute
+		var err error
+		st, err = s.runner.Start(agentrun.Launch{Spec: spec, State: c.P.State(), Turn: h.Turn(), Max: max})
+		return err
+	})
+	if err != nil {
+		return st, err
 	}
-	return s.runner.Start(agentrun.Launch{Spec: spec, State: c.P.State(), Turn: h.Turn(), Max: max})
+	if o != nil {
+		return agentrun.Status{}, fmt.Errorf("%s (session liée) mène ce tour : rien n'est lancé à côté", o.Name)
+	}
+	return st, nil
 }
 
 // agentRun gives the run of the agent launched by Glose.

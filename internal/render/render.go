@@ -11,7 +11,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"regexp"
 	"runtime"
@@ -30,6 +29,7 @@ import (
 	"github.com/ptitan/glose/internal/sourcemap"
 	"github.com/ptitan/glose/internal/sourcepos"
 	"github.com/ptitan/glose/internal/store"
+	"github.com/ptitan/glose/internal/trust"
 )
 
 // File describes one file of the rendered document.
@@ -118,6 +118,9 @@ type Doc struct {
 	// says whether a part can be rendered alone (P6.8).
 	Part    string `json:"part"`
 	PerFile bool   `json:"perFile"`
+	// Approval is what the profile names and the author has not approved
+	// (D-64): the text was rendered without it.
+	Approval *trust.Need `json:"approval,omitempty"`
 }
 
 // KindName is the name of a mark kind in the JSON outputs (stable, English).
@@ -142,19 +145,88 @@ type Renderer struct {
 	// filterHash is the hash of the filter when the HTML kept was made: a
 	// filter changed under the same name invalidates it.
 	filterHash string
+	// Gated: the program and the filter that the profile names run only once
+	// the author has approved them (D-64); without approval, the text is
+	// rendered with the pandoc of the PATH and without filter, and the Doc
+	// says what awaits. The server sets it; the command line runs with the
+	// rights of whoever calls it.
+	Gated bool
+	// diskProgram is the program the disk cache was opened for.
+	diskProgram string
 }
 
-// filterState returns the hash of the filter as it is now ("" without
-// filter), and forgets the HTML kept if the filter changed.
-func (r *Renderer) filterState() string {
-	if r.P.Filter == "" {
-		return ""
+// gateSpec is what a render runs: the program, the filter (absolute path,
+// or "") and the hash of its content, and what awaits the author's approval.
+type gateSpec struct {
+	pandoc, filter, filterHash string
+	pending                    *trust.Need
+}
+
+// gate decides, once per render, what runs (D-64).
+func (r *Renderer) gate() gateSpec {
+	n := trust.Of(r.P.Root, r.P.Pandoc, r.P.Filter)
+	g := gateSpec{pandoc: r.P.Pandoc, filter: r.P.Filter, filterHash: n.FilterHash}
+	if g.pandoc == "" {
+		g.pandoc = trust.DefaultPandoc
 	}
-	b, err := os.ReadFile(r.P.Filter)
-	if err != nil {
-		return ""
+	if g.filter != "" && g.filterHash == "" {
+		g.filter = "" // unreadable: pandoc would fail on it
 	}
-	h := store.Hash(b)
+	if !r.Gated || n.Empty() {
+		return g
+	}
+	pOK, fOK := trust.Check(r.P.Root, n)
+	pend := n
+	if pOK {
+		pend.Pandoc = ""
+	} else {
+		g.pandoc = trust.DefaultPandoc
+	}
+	if fOK {
+		pend.Filter, pend.FilterHash = "", ""
+	} else {
+		g.filter, g.filterHash = "", ""
+	}
+	if !pend.Empty() {
+		g.pending = &pend
+	}
+	return g
+}
+
+// Pending returns what the profile names and awaits the author's approval
+// (D-64), or nil.
+func (r *Renderer) Pending() *trust.Need { return r.gate().pending }
+
+// Program returns the pandoc program that runs now; CacheProgram the one the
+// disk cache was opened for ("" without disk cache).
+func (r *Renderer) Program() string { return r.program() }
+
+// CacheProgram: see Program.
+func (r *Renderer) CacheProgram() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.disk == nil {
+		return r.program()
+	}
+	return r.diskProgram
+}
+
+// program is the pandoc program that may run now (D-64).
+func (r *Renderer) program() string {
+	if r.P.Pandoc == "" || r.P.Pandoc == trust.DefaultPandoc {
+		return trust.DefaultPandoc
+	}
+	if r.Gated {
+		if ok, _ := trust.Check(r.P.Root, trust.Need{Pandoc: r.P.Pandoc}); !ok {
+			return trust.DefaultPandoc
+		}
+	}
+	return r.P.Pandoc
+}
+
+// filterState records h, the hash of the filter run now ("" without filter),
+// and forgets the HTML kept if it changed.
+func (r *Renderer) filterState(h string) string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if h != r.filterHash {
@@ -225,7 +297,8 @@ func (r *Renderer) RenderPart(ctx context.Context, v projection.View, part strin
 		return nil, fmt.Errorf("vue non rendue : %s", v)
 	}
 	start := time.Now()
-	doc := &Doc{Title: r.P.Title, Annotations: []Annotation{}, Issues: []Issue{}, PerFile: r.P.PerFile}
+	g := r.gate()
+	doc := &Doc{Title: r.P.Title, Annotations: []Annotation{}, Issues: []Issue{}, PerFile: r.P.PerFile, Approval: g.pending}
 	srcs := make([]store.Doc, len(r.P.Files))
 	errs := make([]error, len(r.P.Files))
 	total := 0
@@ -313,7 +386,7 @@ func (r *Renderer) RenderPart(ctx context.Context, v projection.View, part strin
 		api = []any{1, 23}
 	}
 	if r.P.PerFile {
-		html, err := r.htmlPerFile(ctx, api, v, shown, parts)
+		html, err := r.htmlPerFile(ctx, api, v, shown, parts, g)
 		if err != nil {
 			return nil, err
 		}
@@ -327,11 +400,8 @@ func (r *Renderer) RenderPart(ctx context.Context, v projection.View, part strin
 	}
 	// --id-prefix keeps the identifiers of the text (titles, labels) apart
 	// from those of the interface; pandoc prefixes internal links as well.
-	args := []string{"-f", "json", "-t", "html5", "--wrap=none", "--mathml", "--id-prefix=gl-", "-M", "glose=true"}
-	if r.P.Filter != "" {
-		args = append(args, "--lua-filter", r.P.Filter)
-	}
-	html, err := r.pandoc(ctx, tree, args...)
+	r.filterState(g.filterHash)
+	html, err := r.pandoc(ctx, tree, r.htmlArgs(g.filter)...)
 	if err != nil {
 		return nil, err
 	}
@@ -438,7 +508,7 @@ func (r *Renderer) pandoc(ctx context.Context, input []byte, args ...string) ([]
 		return nil, ctx.Err()
 	}
 	defer func() { <-pandocSlots }()
-	cmd := exec.CommandContext(ctx, r.P.Pandoc, args...)
+	cmd := exec.CommandContext(ctx, r.program(), args...)
 	cmd.Dir = r.P.Root
 	cmd.Stdin = bytes.NewReader(input)
 	var out, errOut bytes.Buffer
@@ -459,11 +529,13 @@ func fileDiv(i int, path string, blocks []any) any {
 	}}
 }
 
-// htmlArgs are the arguments of the HTML pass of pandoc.
-func (r *Renderer) htmlArgs() []string {
-	args := []string{"-f", "json", "-t", "html5", "--wrap=none", "--mathml", "--id-prefix=gl-", "-M", "glose=true"}
-	if r.P.Filter != "" {
-		args = append(args, "--lua-filter", r.P.Filter)
+// htmlArgs are the arguments of the HTML pass of pandoc. --eol=lf: the same
+// HTML on every system (pandoc writes CRLF under Windows by default, which
+// the pieces of a file rendered by sections did not expect).
+func (r *Renderer) htmlArgs(filter string) []string {
+	args := []string{"-f", "json", "-t", "html5", "--wrap=none", "--eol=lf", "--mathml", "--id-prefix=gl-", "-M", "glose=true"}
+	if filter != "" {
+		args = append(args, "--lua-filter", filter)
 	}
 	return args
 }
@@ -473,10 +545,10 @@ func (r *Renderer) htmlArgs() []string {
 // only the file written is made again. The footnotes of a file are numbered
 // in it and placed at its end; their identifiers are prefixed by the file
 // (footnoteIDs), since every file starts again at note 1.
-func (r *Renderer) htmlPerFile(ctx context.Context, api any, v projection.View, files []loaded, parts [][]byte) ([]byte, error) {
+func (r *Renderer) htmlPerFile(ctx context.Context, api any, v projection.View, files []loaded, parts [][]byte, g gateSpec) ([]byte, error) {
 	out := make([][]byte, len(parts))
 	errs := make([]error, len(parts))
-	fh := r.filterState()
+	fh := r.filterState(g.filterHash)
 	var wg sync.WaitGroup
 	for k := range parts {
 		i := files[k].idx
@@ -511,7 +583,7 @@ func (r *Renderer) htmlPerFile(ctx context.Context, api any, v projection.View, 
 			defer wg.Done()
 			tree, err := treeRaw(api, [][]byte{parts[k]})
 			if err == nil {
-				out[k], err = r.pandoc(ctx, tree, r.htmlArgs()...)
+				out[k], err = r.pandoc(ctx, tree, r.htmlArgs(g.filter)...)
 			}
 			if err != nil {
 				errs[k] = err
@@ -769,7 +841,7 @@ func (r *Renderer) LiteralOutsideCode(ctx context.Context, src []byte) ([]int, e
 		return nil, nil
 	}
 	proj := projection.Project(src, projection.Current)
-	tree, err := sourcepos.Run(ctx, r.P.Pandoc, proj.Text)
+	tree, err := sourcepos.Run(ctx, r.program(), proj.Text)
 	if err != nil {
 		return nil, err
 	}
@@ -864,9 +936,9 @@ func (r *Renderer) Preview(ctx context.Context, file int, md []byte) (string, er
 	if err != nil {
 		return "", err
 	}
-	args := []string{"-f", "json", "-t", "html5", "--wrap=none", "--mathml", "--id-prefix=gl-apercu-", "-M", "glose=true"}
-	if r.P.Filter != "" {
-		if html, err := r.pandoc(ctx, tree, append(args, "--lua-filter", r.P.Filter)...); err == nil {
+	args := []string{"-f", "json", "-t", "html5", "--wrap=none", "--eol=lf", "--mathml", "--id-prefix=gl-apercu-", "-M", "glose=true"}
+	if g := r.gate(); g.filter != "" {
+		if html, err := r.pandoc(ctx, tree, append(args, "--lua-filter", g.filter)...); err == nil {
 			return string(html), nil
 		}
 	}

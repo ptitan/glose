@@ -90,6 +90,8 @@ async function rejectAll(page) {
 
 const scenarios = [
   ["missions : cartes et filtre de marge", require("./missions.cjs")],
+  ["missions : « Tout accepter » limité à la mission (D-65)", require("./mission-batch.cjs")],
+  ["filtre : exécuté seulement une fois approuvé (D-64)", require("./approval.cjs")],
   ["Typo : propositions et acceptation filtrée", require("./typo.cjs")],
   ["vue Depuis en lecture seule", require("./since.cjs")],
   ['consignes : création, accès, confirmation et retrait', require('./tasks.cjs')],

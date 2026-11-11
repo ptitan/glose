@@ -3,6 +3,7 @@ package navette
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"time"
 
@@ -125,9 +126,22 @@ func DecideRange(src []byte, start, end int, decision string) (patch.Edit, error
 
 // DecideVia restricts the existing batch decision to one signature.
 func DecideVia(src []byte, start, end int, decision, via string) (patch.Edit, error) {
+	return DecideFiltered(src, start, end, decision, via, "")
+}
+
+// DecideFiltered restricts the batch decision to one signature (via) and to
+// one mission (task, D-65): a proposal of the mission, or one whose thread
+// has a message of it, as the filter of the interface shows them. The
+// partner of a note follows its reference, as in the interface (one card).
+func DecideFiltered(src []byte, start, end int, decision, via, task string) (patch.Edit, error) {
 	allowed := map[int]bool{}
+	partner := map[int]bool{}
 	for _, a := range review.Read(src).Annotations {
-		if via == "" || a.Via == via {
+		if via != "" && a.Via != via {
+			continue
+		}
+		partner[a.Span.Start] = true
+		if task == "" || a.Task == task || slices.ContainsFunc(a.Messages, func(m review.Message) bool { return m.Task == task }) {
 			allowed[a.Span.Start] = true
 		}
 	}
@@ -159,7 +173,7 @@ func DecideVia(src []byte, start, end int, decision, via string) (patch.Edit, er
 	}
 	for _, a := range append([]critic.Annotation(nil), targets...) {
 		for _, p := range links[a.Span.Start].Partners {
-			if !chosen[p] && allowed[p] {
+			if !chosen[p] && partner[p] {
 				chosen[p] = true
 				for _, b := range critic.Group(marks) {
 					if b.Span.Start == p {

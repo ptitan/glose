@@ -74,7 +74,7 @@ func applyAccess(s Spec, args, env []string) ([]string, []string, error) {
 		if outsideWorkdir {
 			allowed = []string{"Bash(glose *)", "Read(/**)"}
 		}
-		denied := []string{"Read(/.glose/**)", "Edit(/.glose/**)"}
+		denied := []string{"Read(/.glose/**)", "Edit(/.glose/**)", claudeLuaDeny}
 		if s.DryRun {
 			allowed = []string{"Bash(glose status*)", "Bash(glose list*)", "Read(/**)"}
 			denied = append(denied, "Edit", "Agent", "Bash(python *)", "Bash(python3 *)")
@@ -198,9 +198,11 @@ func applyAccess(s Spec, args, env []string) ([]string, []string, error) {
 		if s.DryRun {
 			add("edit", "*", "deny")
 		}
-		// Keep the decision token protected even after broad grants.
+		// Keep the decision token protected even after broad grants, and the
+		// Lua filters out of reach (D-64).
 		add("read", ".glose/*", "deny")
 		add("edit", ".glose/*", "deny")
+		add("edit", opencodeLuaDeny, "deny")
 		if s.Root != "" {
 			p := strings.TrimSuffix(filepath.ToSlash(s.Root), "/") + "/.glose/*"
 			add("read", p, "deny")

@@ -67,18 +67,25 @@ window.GloseSaisie = (() => {
     const req = { file: s.file, hash: s.hash, mode: s.mode, start: s.start, end: s.end, text: s.prefixe + texte, recipient: dest.pour };
     S.envoi = true;
     S.occupe++;
-    $("saisie-ok").disabled = true;
-    $("saisie").querySelector(".corps").inert = true;
-    const pret = await preparerBrouillon("saisie");
-    const r = !pret ? { ok: false, status: 400, data: { error: "draft", message: "Brouillon non confirmé : vérifiez sa sauvegarde avant d'enregistrer." } } : s.mode === "reply"
-      ? await api("/api/reply", { file: s.file, hash: s.hash, start: s.start, text: req.text, recipient: dest.pour })
-      : s.mode === "amend"
-        ? await api("/api/amend", { file: s.file, hash: s.hash, start: s.start, text: texte })
-        : await api("/api/comment", req);
-    await apresEnvoiBrouillon(s, r);
-    $("saisie").querySelector(".corps").inert = false;
-    $("saisie-ok").disabled = false;
-    S.envoi = false;
+    let r = null;
+    // Released whatever happens (audit A14), as in the editor.
+    try {
+      $("saisie-ok").disabled = true;
+      $("saisie").querySelector(".corps").inert = true;
+      const pret = await preparerBrouillon("saisie");
+      r = !pret ? { ok: false, status: 400, data: { error: "draft", message: "Brouillon non confirmé : vérifiez sa sauvegarde avant d'enregistrer." } } : s.mode === "reply"
+        ? await api("/api/reply", { file: s.file, hash: s.hash, start: s.start, text: req.text, recipient: dest.pour })
+        : s.mode === "amend"
+          ? await api("/api/amend", { file: s.file, hash: s.hash, start: s.start, text: texte })
+          : await api("/api/comment", req);
+      await apresEnvoiBrouillon(s, r);
+    } catch (e) {
+      r = r || { ok: false, status: 0, data: { error: "exception", message: "L'enregistrement a échoué (" + e.message + ") : votre saisie reste dans Brouillons." } };
+    } finally {
+      $("saisie").querySelector(".corps").inert = false;
+      $("saisie-ok").disabled = false;
+      S.envoi = false;
+    }
     try {
       if (r.ok && s.mode === "amend") {
         S.annuler.push({ type: "modification", file: s.file, start: r.data.start, hashApres: r.data.hash, avant: s.original, apres: texte, reponse: s.reponse });

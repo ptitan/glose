@@ -105,3 +105,24 @@ func TestOutsideWorkdirDoesNotGrantClaudeEdit(t *testing.T) {
 		t.Fatal(args)
 	}
 }
+
+// D-64: whatever the access granted (even an external write that would list
+// the project), a task never lets Claude Code or OpenCode change a Lua filter.
+func TestTaskAccessNeverAllowsLuaFilters(t *testing.T) {
+	restore := SetLookPath(func(s string) (string, error) { return s, nil })
+	defer restore()
+	access := agents.Access{ExternalDirs: "all", Dirs: []string{"/project"}, ExternalWrite: true, Scripts: "python"}
+	for agent, want := range map[string]string{"claude": "Edit(/**/*.lua)", "opencode": `{"action":"edit","effect":"deny","resource":"*.lua"}`} {
+		cmd, err := Command(context.Background(), Spec{Agent: agent, Dir: "/project", Access: &access})
+		if err != nil {
+			t.Fatal(err)
+		}
+		all := strings.Join(append(cmd.Args, cmd.Env...), " ")
+		if !strings.Contains(all, want) {
+			t.Fatalf("%s : %q absent de %s", agent, want, all)
+		}
+		if agent == "opencode" && strings.LastIndex(all, `"resource":"*.lua"`) < strings.LastIndex(all, `"action":"edit","effect":"allow"`) {
+			t.Fatalf("opencode : un droit d'écrire vient après le refus (la dernière règle l'emporte) : %s", all)
+		}
+	}
+}

@@ -9,7 +9,7 @@
   // References captured before any text injection: a heading in the text
   // cannot be mistaken for them (its identifiers are also prefixed).
   const UI = {};
-  for (const id of ["bouton-sommaire", "consignes-barre", "remise-consignes", "remise-consigne", "remise-fichiers", "remise-acces", "remise-blocages", "titre", "etat", "annuler", "retablir", "anomalies", "bandeau", "sommaire",
+  for (const id of ["bouton-sommaire", "consignes-barre", "remise-consignes", "remise-consigne", "remise-fichiers", "remise-acces", "remise-blocages", "titre", "etat", "annuler", "retablir", "anomalies", "approbation", "bandeau", "sommaire",
     "texte", "marge", "bouton-commenter", "poignee", "menu-bloc", "menu-commenter", "menu-suggerer", "saisie", "saisie-titre", "saisie-extrait",
     "saisie-texte", "saisie-message", "saisie-autre", "saisie-fermer", "saisie-ok", "saisie-annuler", "edition-annuler", "avis", "outils-bloc",
     "edition", "edition-texte", "edition-message", "edition-ok", "edition-direct", "edition-fermer",
@@ -518,6 +518,7 @@
     texte.setAttribute("aria-busy", "false");
     zone().querySelectorAll(".g-depuis").forEach(e => e.classList.remove("g-depuis"));
     anomalies();
+    approbation();
     majMissions();
     annoter();
     sommaire();
@@ -701,6 +702,20 @@
     const ul = el("ul");
     for (const l of lignes) ul.append(el("li", "", l));
     zone.append(ul);
+  }
+
+  // D-64: what the profile runs and the author has not approved; the text
+  // was rendered without it. Approving is a gesture in a terminal: the
+  // interface has no button for it, since an agent that can read the token
+  // of the session (Codex) could press it.
+  function approbation() {
+    const a = S.doc.approval, zone = $("approbation");
+    zone.hidden = !a;
+    zone.textContent = "";
+    if (!a) return;
+    const quoi = [a.filter && "le filtre Lua " + a.filter, a.pandoc && "le programme " + a.pandoc].filter(Boolean).join(" et ");
+    zone.append("Le texte s'affiche sans " + quoi + " : il n'a pas encore votre accord, ou il a changé depuis (un agent a pu le modifier)." +
+      " Relisez-le, puis tapez ", el("code", "", "glose approve"), " dans un terminal, dans le dossier du projet : il s'exécute avec vos droits.");
   }
 
   function majEtat() {
@@ -1318,13 +1333,15 @@
   }
 
   // Batch decisions (F12): all proposals in a file.
-  async function deciderTout(f, decision, n, via = "") {
+  // task: the mission filter shown (D-65); only the proposals counted, those
+  // of that mission, are decided.
+  async function deciderTout(f, decision, n, via = "", task = "") {
     if (saisieEnCours()) return;
     if (S.ecriture) { avis("Une écriture est en cours : réessayez dans un instant."); return; }
     const verbe = decision === "accept" ? "Accepter" : "Rejeter";
     const accepter = decision === "accept";
     if (!(await boite({
-      titre: verbe + (via ? " (" + via + ")" : "") + " " + (n > 1 ? "les " + n + " propositions" : "la proposition") + " ?",
+      titre: verbe + (via ? " (" + via + ")" : "") + (task ? " (mission " + (S.doc.taskLabels?.[task]?.name || task) + ")" : "") + " " + (n > 1 ? "les " + n + " propositions" : "la proposition") + " ?",
       message: (accepter ? "Le texte proposé remplacera l'original" : "Le texte d'origine restera") + " dans " + S.doc.files[f].path +
         ". Chaque décision est gardée au journal.",
       icone: accepter ? "tout-accepter" : "rejeter", ton: accepter ? "succes" : "danger",
@@ -1333,7 +1350,7 @@
     S.ecriture = true;
     S.occupe++;
     try {
-      const req = { file: f, hash: S.hashes[f], start: 0, end: Number.MAX_SAFE_INTEGER, decision, via };
+      const req = { file: f, hash: S.hashes[f], start: 0, end: Number.MAX_SAFE_INTEGER, decision, via, task };
       const r = await api("/api/decide", req);
       retenirDecision(r, req);
       if (r.ok) avis(n + " proposition" + (n > 1 ? "s" : "") + (decision === "accept" ? " acceptée" : " rejetée") + (n > 1 ? "s" : "") +
@@ -1380,7 +1397,16 @@
   }
 
   // ---------- Disk monitoring ----------
+  // One poll at a time (P21.10): on a slow disk, an answer may take longer
+  // than the interval; the polls must not pile up.
+  let surveillance = false;
   async function surveiller() {
+    if (surveillance) return;
+    surveillance = true;
+    try { await surveillerUneFois(); } finally { surveillance = false; }
+  }
+
+  async function surveillerUneFois() {
     if (S.occupe || document.hidden) return;
     if (S.echecs > 2 && (S.echecs++ % 5) !== 0) return; // less often after failures
     if (!S.doc) { // first load failed: retry
@@ -1391,7 +1417,8 @@
     if (!r.ok || S.occupe) { if (!r.ok) S.echecs++; return; }
     // An added or removed file (chapter created by the agent, profile changed) also changes the list.
     const change = r.data.filesGen !== S.doc.filesGen || r.data.files.length !== S.doc.files.length ||
-      r.data.files.some((f) => S.hashes[f.index] !== f.hash) || r.data.seq !== S.doc.seq;
+      r.data.files.some((f) => S.hashes[f.index] !== f.hash) || r.data.seq !== S.doc.seq ||
+      JSON.stringify(r.data.approval || null) !== JSON.stringify(S.doc.approval || null); // D-64
     // Agent presence changes without anything else changing (P10.1).
     const cle = (o) => JSON.stringify([o.agent || null, o.agentsConfigured, o.tasks || [], o.textAgent || null, o.textRequires || [], o.run || null, o.passes || null, o.aliases || [], o.link || null, o.owner || null]);
     if (S.doc.state && cle({ ...r.data }) !== cle({ ...S.doc, agent: S.doc.state.agent })) {

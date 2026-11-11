@@ -35,6 +35,11 @@ func cmdInit(args []string, stdout, stderr io.Writer) int {
 		io.WriteString(stdout, NavetteSection)
 		return ExitOK
 	}
+	// Writing a profile and instructions is the author's (audit A6): a
+	// launched agent may still read the section with --print.
+	if refusedToAgent("glose init (sauf --print)", stderr) {
+		return ExitProblem
+	}
 	if err := home.Init(path, to, kind, stdout, stderr); err != nil {
 		return failure(stderr, err)
 	}

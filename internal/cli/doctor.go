@@ -8,9 +8,11 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -152,6 +154,10 @@ func doctor(path string) []doctorFinding {
 	}
 	for _, w := range p.MetaWarnings {
 		proj("warning", "métadonnées", w, "corrigez la clé project de "+project.ProfileName+" (glose help profile), ou passez par glose project")
+	}
+	if left := leftTemps(p); len(left) > 0 {
+		proj("warning", "fichiers temporaires", fmt.Sprintf("%d laissé%s par une écriture interrompue : %s", len(left), plural(len(left)), strings.Join(left, ", ")),
+			"vérifiez que le texte est complet (glose check), puis effacez ces fichiers ; Glose ne les efface pas lui-même")
 	}
 
 	if p.CSS != "" {
@@ -335,4 +341,25 @@ func quoteArg(s string) string {
 		return `"` + s + strings.Repeat(`\`, len(s)-len(strings.TrimRight(s, `\`))) + `"`
 	}
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// leftTemps lists the temporary files of Glose (« .glose-*.tmp ») left next to
+// the files of the text by a write interrupted by a crash (audit A15):
+// paths relative to the project, in the directories of its files.
+func leftTemps(p *project.Project) []string {
+	dirs := map[string]bool{".": true}
+	for _, f := range p.Files {
+		dirs[path.Dir(f)] = true
+	}
+	var out []string
+	for d := range dirs {
+		matches, _ := filepath.Glob(filepath.Join(p.Root, filepath.FromSlash(d), ".glose-*.tmp"))
+		for _, m := range matches {
+			if rel, err := filepath.Rel(p.Root, m); err == nil {
+				out = append(out, filepath.ToSlash(rel))
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
 }

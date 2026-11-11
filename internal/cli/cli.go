@@ -23,12 +23,14 @@ import (
 	"github.com/ptitan/glose/internal/critic"
 	"github.com/ptitan/glose/internal/journal"
 	"github.com/ptitan/glose/internal/navette"
+	"github.com/ptitan/glose/internal/proc"
 	"github.com/ptitan/glose/internal/project"
 	"github.com/ptitan/glose/internal/projection"
 	"github.com/ptitan/glose/internal/render"
 	"github.com/ptitan/glose/internal/review"
 	"github.com/ptitan/glose/internal/server"
 	"github.com/ptitan/glose/internal/store"
+	"github.com/ptitan/glose/internal/trust"
 )
 
 // Version is the program version. Release builds override it with
@@ -57,7 +59,11 @@ fixe le titre, un filtre et une feuille de style : voir « glose help profile »
 Commandes de l'auteur :
   open      lance le serveur de relecture en arrière-plan et ouvre le navigateur ;
             un sous-dossier ou un fichier d'un projet (sous un glose.json)
-            ouvre le projet entier, avec cette partie mise en avant
+            ouvre le projet entier, avec cette partie mise en avant ; tapé dans
+            un terminal, approuve à la première ouverture le filtre et le pandoc
+            du profil (D-64)
+  approve   approuve le filtre et le pandoc du profil tels qu'ils sont (D-64) ;
+            à taper dans un terminal, réservé à l'auteur
               --no-browser   n'ouvre pas le navigateur
   stop      arrête le serveur du projet
   set       ouvre les réglages des agents (tous les projets) : agents
@@ -75,8 +81,9 @@ Commandes de l'auteur :
                                 chemin, même disparu) ; le projet n'est pas touché
   init      crée un profil glose.json s'il n'y en a pas (fichiers de la racine,
             puis un dossier par sous-dossier : à trier), et écrit la section
-            « Navette Glose » dans AGENTS.md (ou CLAUDE.md s'il est seul)
-              --to FICHIER   autre fichier d'instructions
+            « Navette Glose » dans AGENTS.md (ou CLAUDE.md s'il est seul) ;
+            réservé à l'auteur : refusé si GLOSE_AGENT est posé, sauf --print
+              --to FICHIER   autre fichier d'instructions, dans le projet
               --print        affiche seulement la section
               --type NOM     recopie d'abord le gabarit NOM de votre configuration
                              (gabarits/NOM/ : arborescence, glose.json,
@@ -205,6 +212,8 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		return ExitOK
 	case "open":
 		return cmdOpen(rest, stdout, stderr)
+	case "approve":
+		return cmdApprove(rest, stdout, stderr)
 	case "stop":
 		return cmdStop(rest, stdout, stderr)
 	case "progress":
@@ -327,9 +336,10 @@ func cmdOpen(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return failure(stderr, err)
 	}
+	program := approveProfile(p, stdout, stderr)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if _, err := render.CheckPandoc(ctx, p.Pandoc); err != nil {
+	if _, err := render.CheckPandoc(ctx, program); err != nil {
 		return failure(stderr, err)
 	}
 	st, started, err := server.Start(p)
@@ -867,4 +877,75 @@ func messageTask(messages []render.Message, task string) bool {
 		}
 	}
 	return false
+}
+
+// interactive tells whether a person typed the command (tests replace it).
+var interactive = proc.Interactive
+
+// approveProfile approves, at the first opening of a project typed in a
+// terminal, what its profile runs when it is rendered (D-64): an agent
+// launched by Glose has neither a terminal nor the right (GLOSE_AGENT). Once
+// something was approved, a change is never approved here: it waits for
+// « glose approve ». It says what it approves, or what awaits. It returns the
+// pandoc program that may run.
+func approveProfile(p *project.Project, stdout, stderr io.Writer) string {
+	n := trust.Of(p.Root, p.Pandoc, p.Filter)
+	if n.Empty() {
+		return trust.DefaultPandoc
+	}
+	if !trust.Known(p.Root) && os.Getenv(agentEnv) == "" && interactive() {
+		approved, err := trust.Approve(p.Root, n)
+		switch {
+		case err != nil:
+			fmt.Fprintf(stderr, "glose : %s non approuvé : %v\n", n.Describe(), err)
+		case approved:
+			fmt.Fprintf(stdout, "Première ouverture : %s approuvé, exécuté à chaque rendu avec vos droits. Modifié ensuite (par un agent ou par vous), il attendra « glose approve ».\n", n.Describe())
+		}
+	}
+	if pOK, fOK := trust.Check(p.Root, n); !pOK || !fOK {
+		fmt.Fprintf(stdout, "En attente de votre accord : %s ; le texte s'affiche sans. Relisez-le, puis tapez « glose approve » dans un terminal, dans le dossier du projet.\n", n.Describe())
+		if !pOK {
+			return trust.DefaultPandoc
+		}
+	}
+	return p.Pandoc
+}
+
+// cmdApprove approves what the profile runs when it is rendered, as it is
+// now (D-64): the author's alone, typed in a terminal.
+func cmdApprove(args []string, stdout, stderr io.Writer) int {
+	path, ok := parse("approve", args, stderr, nil)
+	if !ok {
+		return ExitUsage
+	}
+	if refusedToAgent("glose approve", stderr) {
+		return ExitProblem
+	}
+	if !interactive() {
+		fmt.Fprintln(stderr, "glose : glose approve se tape dans un terminal : ce qu'il approuve s'exécute avec vos droits.")
+		return ExitProblem
+	}
+	p, err := project.Load(path)
+	if err != nil {
+		return failure(stderr, err)
+	}
+	n := trust.Of(p.Root, p.Pandoc, p.Filter)
+	if n.Empty() {
+		fmt.Fprintln(stdout, "Rien à approuver : ni filtre, ni autre pandoc dans le profil.")
+		return ExitOK
+	}
+	approved, err := trust.Approve(p.Root, n)
+	if err != nil {
+		return failure(stderr, err)
+	}
+	if !approved {
+		fmt.Fprintf(stdout, "Déjà approuvé : %s.\n", n.Describe())
+		return ExitOK
+	}
+	what := n.Describe()
+	if n.FilterHash != "" {
+		what += " (contenu " + n.FilterHash[:12] + "…)"
+	}
+	fmt.Fprintf(stdout, "Approuvé : %s ; le serveur l'exécute dès le prochain affichage.\n", what)
+	return ExitOK
 }

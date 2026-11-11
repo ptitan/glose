@@ -511,9 +511,12 @@ func TestInitTypeWritesNothingThroughALink(t *testing.T) {
 	os.MkdirAll(linked, 0o755)
 	os.MkdirAll(ext, 0o755)
 	os.Symlink(ext, filepath.Join(linked, "consignes"))
-	for _, to := range []string{filepath.Join("consignes", "AGENTS.md"), filepath.Join("..", "hors.md"), filepath.Join(ext, "abs.md")} {
-		code, out, errOut := run("init", "--type", "note", "--to", to, linked)
-		if code != ExitOK || !strings.Contains(out, "non écrite") {
+	if code, out, errOut := run("init", "--type", "note", "--to", filepath.Join("consignes", "AGENTS.md"), linked); code != ExitOK || !strings.Contains(out, "non écrite") {
+		t.Fatalf("dossier lié : %d %q %q", code, out, errOut)
+	}
+	// Out of the project: refused before anything is written (audit A6).
+	for _, to := range []string{filepath.Join("..", "hors.md"), filepath.Join(ext, "abs.md")} {
+		if code, out, errOut := run("init", "--type", "note", "--to", to, linked); code != ExitProblem || !strings.Contains(errOut, "--to") {
 			t.Fatalf("%s : %d %q %q", to, code, out, errOut)
 		}
 	}
@@ -559,5 +562,37 @@ func TestInitWithoutTypeIsUnchanged(t *testing.T) {
 	b, _ := os.ReadFile(filepath.Join(dir, "glose.json"))
 	if strings.Contains(string(b), "project") {
 		t.Fatalf("profil : %s", b)
+	}
+}
+
+// glose init writes the profile and the instructions: the author's alone, and
+// never outside the project (audit A6).
+func TestInitRefusedToAnAgentAndOutsideTheProject(t *testing.T) {
+	base := isolateHome(t)
+	dir := filepath.Join(base, "projet")
+	writeTree(t, dir, map[string]string{"a.md": "T\n"})
+	before := snapshotTree(t, dir)
+	t.Setenv("GLOSE_AGENT", "Sol")
+	if code, _, errOut := run("init", dir); code != ExitProblem || !strings.Contains(errOut, "réservé à l'auteur") {
+		t.Fatalf("agent : %d %q", code, errOut)
+	}
+	if code, out, _ := run("init", "--print"); code != ExitOK || !strings.Contains(out, "Navette") {
+		t.Fatalf("--print refusé à l'agent : %d", code)
+	}
+	t.Setenv("GLOSE_AGENT", "")
+	outside := filepath.Join(base, "ailleurs.md")
+	for _, to := range []string{"../ailleurs.md", "sous/../../ailleurs.md", outside} {
+		if code, _, errOut := run("init", "--to", to, dir); code != ExitProblem || !strings.Contains(errOut, "--to") {
+			t.Errorf("%s : %d %q", to, code, errOut)
+		}
+	}
+	if _, err := os.Stat(outside); err == nil {
+		t.Fatal("écrit hors du projet")
+	}
+	if after := snapshotTree(t, dir); len(after) != len(before) {
+		t.Fatalf("refus : écrit quelque chose %v", after)
+	}
+	if code, _, errOut := run("init", "--to", "consignes/AGENTS.md", dir); code != ExitOK {
+		t.Fatalf("--to dans le projet : %d %q", code, errOut)
 	}
 }

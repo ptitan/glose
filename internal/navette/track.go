@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -167,9 +168,13 @@ func myers(x, y []int) ([]step, error) {
 		return nil, nil
 	}
 	max := n + m
-	// trace[d] holds V for -d..d (index k+d).
-	var trace [][]int
-	v := []int{0, 0, 0} // V for k = -1..1 before the first step: V[1] = 0
+	if n > math.MaxInt32 || m > math.MaxInt32 {
+		return nil, ErrTooManyChanges
+	}
+	// trace[d] holds V for -d..d (index k+d), in 32 bits (P21.10): the trace
+	// grows as the square of the changes, 144 Mo at most at maxChanges.
+	var trace [][]int32
+	v := []int32{0, 0, 0} // V for k = -1..1 before the first step: V[1] = 0
 	off := 1
 	var dEnd int
 	found := false
@@ -177,8 +182,8 @@ func myers(x, y []int) ([]step, error) {
 		if d > maxChanges {
 			return nil, ErrTooManyChanges
 		}
-		nv := make([]int, 2*d+1)
-		get := func(k int) int { return v[k+off] }
+		nv := make([]int32, 2*d+1)
+		get := func(k int) int { return int(v[k+off]) }
 		for k := -d; k <= d; k += 2 {
 			var xx int
 			if k == -d || (k != d && get(k-1) < get(k+1)) {
@@ -191,7 +196,7 @@ func myers(x, y []int) ([]step, error) {
 				xx++
 				yy++
 			}
-			nv[k+d] = xx
+			nv[k+d] = int32(xx)
 			if xx >= n && yy >= m {
 				found = true
 			}
@@ -208,7 +213,7 @@ func myers(x, y []int) ([]step, error) {
 	xx, yy := n, m
 	for d := dEnd; d > 0; d-- {
 		pv := trace[d-1]
-		get := func(k int) int { return pv[k+d-1] }
+		get := func(k int) int { return int(pv[k+d-1]) }
 		k := xx - yy
 		var pk int
 		if k == -d || (k != d && get(k-1) < get(k+1)) {

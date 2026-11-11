@@ -42,3 +42,11 @@ func Identity(pid int) string {
 	}
 	return strconv.FormatInt(c.Nanoseconds(), 10)
 }
+
+// Interactive reports whether the standard input of this process is a
+// console: a person typed the command. An agent launched by Glose has none
+// (D-64).
+func Interactive() bool {
+	var mode uint32
+	return syscall.GetConsoleMode(syscall.Stdin, &mode) == nil
+}

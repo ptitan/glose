@@ -97,6 +97,9 @@ body.redimension { cursor: col-resize; user-select: none; }
 #anomalies { margin: 0 1.5rem 0.5rem; padding: 0.7rem 1rem; background: var(--alerte-fond); border: 1px solid var(--alerte-filet);
   border-radius: 10px; font-size: 0.84rem; }
 #anomalies ul { margin: 0.25rem 0 0; padding-left: 1.2rem; }
+#approbation { margin: 0 1.5rem 0.5rem; padding: 0.7rem 1rem; background: var(--alerte-fond); border: 1px solid var(--alerte-filet);
+  border-radius: 10px; font-size: 0.88rem; }
+#approbation code { font-size: 0.95em; }
 
 #page { position: relative; display: flex; justify-content: center; align-items: flex-start; gap: 1.5rem; padding: 0.5rem 1.5rem 40vh; }
 #texte { position: relative; width: calc(var(--texte) + 9rem); max-width: 100%; min-width: 0; padding: 3.5rem 4.5rem 4rem;

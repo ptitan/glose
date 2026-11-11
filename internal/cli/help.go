@@ -46,6 +46,12 @@ profil : les fichiers de la racine, puis chaque sous-dossier, à trier.
   resources  dossiers dont les images peuvent être affichées (par défaut :
              tout le projet)
   pandoc     programme pandoc à utiliser (par défaut : pandoc)
+
+Le serveur n'exécute le filtre et le programme pandoc du profil qu'une fois
+approuvés (D-64) : glose open, tapé dans un terminal, les approuve à la
+première ouverture du projet ; modifiés ensuite, ils attendent glose approve,
+tapé lui aussi dans un terminal. Un pandoc placé dans le projet n'est jamais
+approuvé.
   agent      ce que ce texte demande à l'agent (lot P10), par exemple :
                "agent": {
                  "alias": "Sol",

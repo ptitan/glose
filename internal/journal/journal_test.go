@@ -2,6 +2,7 @@ package journal
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -321,5 +322,54 @@ func TestRestorationNotOnDiskIsSignalled(t *testing.T) {
 	if len(Effective(ev)) != 0 || last.Type != Aborted || !last.Partial || len(last.Files) != 1 || last.Files[0] != "a.md" ||
 		!strings.Contains(last.Reason, "non synchronisés") {
 		t.Fatalf("%+v", last)
+	}
+}
+
+// P21.10: Append reads only the end of a long journal; the sequence numbers
+// and the repair of a truncated last line are those of a whole reading, and
+// a last line longer than the end read is still found.
+func TestAppendToALongJournal(t *testing.T) {
+	f := newFixture(t, nil)
+	for i := 0; i < 600; i++ {
+		if _, err := f.j.Append(Event{Type: Turn, Actor: "author", Reason: strings.Repeat("x", 200)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	info, _ := os.Stat(f.j.Path())
+	if info.Size() <= tailSize {
+		t.Fatalf("journal trop court pour l'essai : %d", info.Size())
+	}
+	fh, _ := os.OpenFile(f.j.Path(), os.O_APPEND|os.O_WRONLY, 0)
+	fh.WriteString(`{"seq":601,"type":"prep`)
+	fh.Close()
+	out, err := f.j.Append(Event{Type: Turn, Actor: "agent"})
+	if err != nil || out[0].Seq != 602 {
+		t.Fatalf("%+v %v", out, err)
+	}
+	ev, _, _ := f.j.Read()
+	if rep := ev[len(ev)-2]; rep.Type != Repair || !strings.Contains(rep.Reason, fmt.Sprintf("à l'octet %d ", info.Size())) {
+		t.Fatalf("réparation : %+v", rep)
+	}
+	// A last event longer than the end read: found by a whole reading.
+	if _, err := f.j.Append(Event{Type: Turn, Actor: "author", Reason: strings.Repeat("y", 2*tailSize)}); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := f.j.Append(Event{Type: Turn, Actor: "agent"}); err != nil || out[0].Seq != 604 {
+		t.Fatalf("%+v %v", out, err)
+	}
+	if seq, _ := f.j.LastSeq(); seq != 604 {
+		t.Fatalf("LastSeq %d", seq)
+	}
+}
+
+func BenchmarkAppendToALongJournal(b *testing.B) {
+	j := Open(b.TempDir())
+	j.sync = func(*os.File) error { return nil }
+	for i := 0; i < 20000; i++ {
+		j.Append(Event{Type: Turn, Actor: "author", Reason: "une note de remise"})
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		j.Append(Event{Type: Turn, Actor: "author"})
 	}
 }

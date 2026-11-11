@@ -40,7 +40,7 @@ func TestCommandLines(t *testing.T) {
 	}{
 		{Spec{Agent: "claude", Model: "opus", MCP: []string{"lexharness"}},
 			[]string{"-p", "--permission-mode dontAsk", "Bash(glose *)", "Read(/**)", "Edit(/**)", "mcp__lexharness", "mcp__claude_ai_lexharness", "--model opus",
-				"--disallowedTools Read(/.glose/**),Edit(/.glose/**)"},
+				"--disallowedTools Read(/.glose/**),Edit(/.glose/**),Edit(/**/*.lua)"},
 			[]string{"bypass", "dangerously", "Read,", "Edit,", "Write"}, true, ""},
 		{Spec{Agent: "claude", DryRun: true}, []string{"Bash(glose status*)"}, []string{"Edit(/**)", "Write", "Bash(glose *)"}, true, ""},
 		{Spec{Agent: "codex", Model: "gpt-6.1-sol"}, []string{"exec", "-s workspace-write", `approval_policy="never"`, "-m gpt-6.1-sol", "-C " + dir}, []string{"danger"}, true, ""},
@@ -86,6 +86,7 @@ func TestCommandLines(t *testing.T) {
 			if !ok || json.Unmarshal([]byte(perm), &m) != nil || !strings.Contains(perm, c.permission) ||
 				!strings.Contains(perm, `{"action":"external_directory","effect":"deny","resource":"*"}`) ||
 				!strings.Contains(perm, `{"action":"read","effect":"deny","resource":".glose/*"}`) ||
+				!strings.Contains(perm, `{"action":"edit","effect":"deny","resource":"*.lua"}`) ||
 				m.Permissions[0]["action"] != "shell" || m.Permissions[0]["effect"] != "deny" {
 				t.Errorf("permissions d'OpenCode : %s", perm)
 			}

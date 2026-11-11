@@ -38,8 +38,6 @@ const (
 	MetaNextAction = "nextAction"
 )
 
-var metaKeys = []string{MetaType, MetaStatus, MetaDeadline, MetaNextAction}
-
 const (
 	maxTypeLen       = 40
 	maxNextActionLen = 200

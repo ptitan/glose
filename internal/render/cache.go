@@ -73,11 +73,13 @@ func (r *Renderer) EnableDiskCache(ctx context.Context) {
 	if exe == "" {
 		return
 	}
-	version, err := CheckPandoc(ctx, r.P.Pandoc)
+	prog := r.program()
+	version, err := CheckPandoc(ctx, prog)
 	if err != nil {
 		return
 	}
-	r.disk = &diskCache{dir: filepath.Join(r.P.State(), CacheDir), base: exe + "\x00" + r.P.Pandoc + "\x00" + version}
+	r.diskProgram = prog
+	r.disk = &diskCache{dir: filepath.Join(r.P.State(), CacheDir), base: exe + "\x00" + prog + "\x00" + version}
 }
 
 func (c *diskCache) key(parts ...string) string {

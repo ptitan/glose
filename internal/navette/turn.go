@@ -147,11 +147,6 @@ func (n *Navette) Scope(h *History) (*project.Project, error) {
 	return &sc, nil
 }
 
-// locked runs a handover under the lock, n being the scope of the handover.
-func (n *Navette) locked(h *History, actor, owner, note string, reclaimed, force bool, then func(next int) (func(), error)) (*Handover, error) {
-	return n.lockedTask(h, actor, owner, note, reclaimed, force, then, nil)
-}
-
 func (n *Navette) lockedTask(h *History, actor, owner, note string, reclaimed, force bool, then func(int) (func(), error), task *journal.TaskInfo) (*Handover, error) {
 	if h.Hand() != owner {
 		if owner == review.Author {

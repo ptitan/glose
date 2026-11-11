@@ -66,7 +66,7 @@ func Serve(p *project.Project) error {
 		return err
 	}
 	defer lock.Unlock()
-	ln, port, err := Listen()
+	ln, port, err := ListenFor(p.Root)
 	if err != nil {
 		return err
 	}

@@ -92,7 +92,7 @@ func Command(ctx context.Context, s Spec) (*exec.Cmd, error) {
 		// .glose holds the token of the server, the author's key to decide
 		// (D-14): never read nor written by the agent's tools.
 		args = []string{"-p", "--output-format", "text", "--permission-mode", "dontAsk", "--allowedTools", strings.Join(allowed, ","),
-			"--disallowedTools", "Read(/.glose/**),Edit(/.glose/**)"}
+			"--disallowedTools", "Read(/.glose/**),Edit(/.glose/**)," + claudeLuaDeny}
 		if s.Model != "" {
 			args = append(args, "--model", s.Model)
 		}
@@ -135,7 +135,7 @@ func Command(ctx context.Context, s Spec) (*exec.Cmd, error) {
 			}
 		}
 		// .glose holds the token of the server (see claude above).
-		rules = append(rules, rule("read", ".glose/*", "deny"), rule("edit", ".glose/*", "deny"))
+		rules = append(rules, rule("read", ".glose/*", "deny"), rule("edit", ".glose/*", "deny"), rule("edit", opencodeLuaDeny, "deny"))
 		b, _ := json.Marshal(map[string]any{"permissions": rules})
 		env = append(env, "OPENCODE_CONFIG_CONTENT="+string(b))
 		args = []string{"run", "--standalone", "--auto"}
@@ -162,6 +162,15 @@ func Command(ctx context.Context, s Spec) (*exec.Cmd, error) {
 	}
 	return cmd, nil
 }
+
+// The Lua filters of a project run with the rights of the author when the
+// server renders it (D-64): the agent launched by Glose does not change
+// them, nor the modules they may load. The server's approval is the guard;
+// this one is in addition, for the agents that honour it.
+const (
+	claudeLuaDeny   = "Edit(/**/*.lua)"
+	opencodeLuaDeny = "*.lua"
+)
 
 // environ is the environment of the agent: the one of Glose, with the
 // directory of this glose first in the PATH, so that the agent runs the
